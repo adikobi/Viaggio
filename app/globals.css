@@ -44,3 +44,29 @@ gmp-place-autocomplete{width:100%;color-scheme:light dark;border-radius:12px}
 .pin span{rotate:45deg;color:#fff;font:700 12px sans-serif}
 .iw{font:13px/1.4 sans-serif;color:#2a1d17;max-width:220px}.iw b{font-size:15px}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* v2: fonts, bidi, mobile stability, pickers */
+body{font-family:var(--sans),var(--hsans),system-ui,sans-serif;position:fixed;inset:0;overscroll-behavior:none;-webkit-text-size-adjust:100%}
+h1,h2,.pl b,.top select{font-family:var(--serif),var(--hserif),serif}
+input,select,textarea,gmp-place-autocomplete{font-size:16px!important}
+input,textarea,.bd{unicode-bidi:plaintext;text-align:start}
+.app{grid-template-rows:40svh 1fr;height:100svh}
+.panel{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}
+.srch{min-height:52px}
+.leg{margin:0;margin-inline-start:22px;padding-inline-start:14px;border-left:0;border-inline-start:2px dashed var(--line);display:flex;gap:10px;align-items:center}
+.leg a{color:var(--acc2);text-decoration:none;font-weight:500}
+.seg{display:grid;grid-auto-flow:column;gap:2px;padding:3px;border-radius:14px;background:var(--card);border:1px solid var(--line);margin-bottom:12px}
+.seg button{padding:8px;border-radius:11px;color:var(--mut);font-weight:500}
+.seg button[aria-pressed=true]{background:var(--bg);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{padding:6px 11px;border-radius:99px;border:1px solid var(--line);font-size:13px;color:var(--mut)}
+.chip[aria-pressed=true]{background:var(--acc);border-color:var(--acc);color:var(--on)}
+.step{display:flex;align-items:center;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.step input{border:0;border-radius:0;text-align:center;min-width:0;font-variant-numeric:tabular-nums}
+.step button{padding:10px 14px;font-size:18px;color:var(--acc2)}
+.step i{padding-inline-start:12px;font-style:normal;color:var(--mut)}
+.tg{color:var(--acc2);font-size:12.5px;padding:0 4px 0 0;margin-inline-end:6px}
+.todo{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.todo input[type=checkbox]{width:20px;height:20px;accent-color:var(--acc)}
+.todo.done span{text-decoration:line-through;opacity:.5}
+.off{position:sticky;top:-16px;background:var(--acc2);color:#fff;padding:6px 12px;border-radius:10px;font-size:13px;margin-bottom:10px}
+.det{animation:in .25s var(--ease)}
