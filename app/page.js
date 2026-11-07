@@ -7,14 +7,14 @@ const CATS = ['Sightseeing', 'Food', 'Lodging', 'Transport', 'Shopping', 'Other'
 const MODES = { DRIVING: 'Drive', WALKING: 'Walk', TRANSIT: 'Transit' };
 const MC = { DRIVING: '#b34a26', WALKING: '#2f7a5b', TRANSIT: '#3b6fb0' };
 const SPD = { DRIVING: 40, WALKING: 5, TRANSIT: 22 };
-const newDay = () => ({ id: uid(), places: [], notes: '', todos: [], mode: 'DRIVING', lm: {} });
+const newDay = () => ({ id: uid(), places: [], notes: '', todos: [], mode: 'WALKING', lm: {} });
 const newTrip = (name) => ({ id: uid(), name, cc: '€', notes: '', todos: [], days: [newDay()], wish: [] });
 const norm = (v) => {
   v.ts ||= 1;
-  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.days.forEach((d) => { d.notes ??= ''; d.todos ??= []; d.mode ??= 'DRIVING'; d.lm ??= {}; }); });
+  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.days.forEach((d) => { d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; }); });
   return v;
 };
-const modeOf = (d, a, z) => d?.lm?.[a.id + '>' + z.id] || d?.mode || 'DRIVING';
+const modeOf = (d, a, z) => d?.lm?.[a.id + '>' + z.id] || d?.mode || 'WALKING';
 const fmt = (m) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ' ' + (m % 60) + 'm' : ''}` : `${m}m`);
 const km = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
 const ll = (p) => `${p.lat},${p.lng}`;
@@ -88,7 +88,7 @@ function Search({ onPick, focus }) {
 
 const Chips = ({ opts, val, on, f = (x) => x }) => <div className="chips">{opts.map((o) => <button key={o} className="chip" aria-pressed={val === o} onClick={() => on(o)}>{f(o)}</button>)}</div>;
 
-function Todos({ items, set }) {
+function Todos({ items, set, del }) {
   const [v, setV] = useState('');
   const add = () => { const t = v.trim(); if (!t) return; set((l) => [...l, { id: uid(), text: t, done: false }]); setV(''); };
   return <>
@@ -96,7 +96,7 @@ function Todos({ items, set }) {
     {items.map((t) => <div key={t.id} className={'todo' + (t.done ? ' done' : '')}>
       <label><input type="checkbox" checked={t.done} onChange={() => set((l) => l.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)))} /></label>
       <span {...A(t.text)} className="bd" style={{ flex: 1 }}>{t.text}</span>
-      <button className="ib" onClick={() => set((l) => l.filter((x) => x.id !== t.id))} aria-label="Delete"><Ic n="x" /></button>
+      <button className="ib" onClick={() => del(t)} aria-label="Delete"><Ic n="x" /></button>
     </div>)}
   </>;
 }
@@ -226,7 +226,7 @@ export default function Page() {
           if (openId.current === p.id) { info.current.close(); openId.current = null; return; } // second click hides
           const st = sRef.current, t = st.trips[st.cur], d = t.days[st.day] || t.days[0];
           const c = d.places.find((x) => x.id === p.id) || p, idx = d.places.findIndex((x) => x.id === p.id);
-          const md = idx > 0 ? modeOf(d, d.places[idx - 1], c) : d.mode || 'DRIVING';
+          const md = idx > 0 ? modeOf(d, d.places[idx - 1], c) : d.mode || 'WALKING';
           const meta = [c.time, c.cost > 0 ? t.cc + c.cost : ''].filter(Boolean).join(' · ');
           info.current.setContent(`<div class="iw" dir="auto"><b>${esc(c.name)}</b>${c.sub ? `<div class="isub">${esc(c.sub)}</div>` : ''}${c.addr ? `<div class="iad">${esc(c.addr)}</div>` : ''}${meta ? `<div class="imeta">${esc(meta)}</div>` : ''}${c.note ? `<div class="inote">${esc(c.note)}</div>` : ''}<a href="${gmaps(null, c, md)}" target="_blank" rel="noopener">Navigate ➤</a></div>`);
           info.current.open({ map: m, anchor: mkr }); openId.current = p.id;
@@ -333,7 +333,7 @@ export default function Page() {
   const total = legList.reduce((a, l) => a + (l?.t || 0), 0);
   const cost = places.reduce((a, p) => a + (+p.cost || 0), 0);
   const share = () => {
-    const u = gmaps(places[0], places.at(-1), day.mode || 'DRIVING') + (places.length > 2 ? `&waypoints=${places.slice(1, -1).map(ll).join('|')}` : '');
+    const u = gmaps(places[0], places.at(-1), day.mode || 'WALKING') + (places.length > 2 ? `&waypoints=${places.slice(1, -1).map(ll).join('|')}` : '');
     navigator.share ? navigator.share({ title: `${trip.name} · Day ${s.day + 1}`, url: u }).catch(() => {}) : navigator.clipboard.writeText(u).then(() => say('Link copied'));
   };
   const hits = q.trim() ? trip.days.flatMap((d, di) => d.places.map((p, pi) => ({ p, di, pi }))).filter(({ p }) => {
@@ -346,15 +346,15 @@ export default function Page() {
   const showOn = (p) => { if (!map.current) return; map.current.panTo(p); map.current.setZoom(15); if (!desk) setSnap('peek'); else if (dsk === 'list') setDsk('split'); };
   const hasTabs = view === 'plan' && !hits;
   const peekOrList = snap === 'peek';
-  const sc = ns === 'trip' || ns >= trip.days.length ? 'trip' : ns;
+  const sc = ns === 'trip' ? 'trip' : Math.min(s.day, trip.days.length - 1);
   const nobj = sc === 'trip' ? trip : trip.days[sc];
-  const upN = (fn) => up((_, t) => fn(sc === 'trip' ? t : t.days[sc]));
-  const openTasks = day.todos.filter((t) => !t.done).length;
+  const upN = (fn) => up((c, t) => fn(sc === 'trip' ? t : t.days[c.day]));
+  const delTask = (t) => setDlg({ title: 'Delete task?', text: t.text, label: 'Delete', danger: true, ok: () => upN((o) => { o.todos = o.todos.filter((x) => x.id !== t.id); }) });
   const moveDay = (dir) => up((c, t) => { const i = c.day, j = i + dir; if (j >= 0 && j < t.days.length) { t.days.splice(j, 0, t.days.splice(i, 1)[0]); c.day = j; } });
   const removeDay = () => {
     if (trip.days.length < 2) return say('A trip needs at least one day');
     const rm = () => up((c, t) => { t.days.splice(c.day, 1); c.day = Math.max(0, c.day - 1); });
-    places.length ? setDlg({ title: `Remove Day ${s.day + 1}?`, text: `${places.length} stops will be deleted.`, label: 'Remove', danger: true, ok: () => undoable('Day removed', rm) }) : rm();
+    places.length || day.notes.trim() || day.todos.length ? setDlg({ title: `Remove Day ${s.day + 1}?`, text: 'Its stops, notes and tasks will be deleted.', label: 'Remove', danger: true, ok: () => undoable('Day removed', rm) }) : rm();
   };
 
   const ViewSwitch = () => <div className="vs" role="group" aria-label="Layout">{[['list', 'list', 'List'], ['split', 'split', 'Split'], ['map', 'map', 'Map']].map(([k, ic, l]) => <button key={k} aria-pressed={dsk === k} aria-label={l} title={l} onClick={() => setDsk(k)}><Ic n={ic} /></button>)}</div>;
@@ -364,7 +364,7 @@ export default function Page() {
     return <div className="leg" style={{ '--mc': MC[md] }}>
       <span />
       <div className="lgc">
-        <div className="lm" role="group" aria-label="Travel mode">{Object.keys(MODES).map((k) => <button key={k} aria-pressed={md === k} aria-label={MODES[k]} title={MODES[k]} onClick={() => up((_, __, d) => { d.lm ||= {}; if (k === (d.mode || 'DRIVING')) delete d.lm[lk]; else d.lm[lk] = k; })}><Ic n={MI[k]} s={18} /></button>)}</div>
+        <div className="lm" role="group" aria-label="Travel mode">{Object.keys(MODES).map((k) => <button key={k} aria-pressed={md === k} aria-label={MODES[k]} title={MODES[k]} onClick={() => up((_, __, d) => { d.lm ||= {}; if (k === (d.mode || 'WALKING')) delete d.lm[lk]; else d.lm[lk] = k; })}><Ic n={MI[k]} s={18} /></button>)}</div>
         <span className="lt">{L ? <>{L.est && '~'}<b>{fmt(L.t)}</b> · {km(L.d)}</> : <i className="sk" />}</span>
         {L?.est && <button className="ib" onClick={retryLegs} aria-label="Estimate only — retry" title="Estimate only — retry"><Ic n="retry" s={18} /></button>}
         <a className="ib" href={gmaps(a, z, md)} target="_blank" rel="noopener" aria-label="Navigate this leg"><Ic n="nav" s={18} /></a>
@@ -442,7 +442,7 @@ export default function Page() {
             </> : <>
               <div className="row tr">
                 <span className="lbl">Travel by</span>
-                <div className="mode">{Object.entries(MODES).map(([k, v]) => <button key={k} aria-pressed={(day.mode || 'DRIVING') === k} onClick={() => up((_, __, d) => { d.mode = k; d.lm = {}; })}><Ic n={MI[k]} s={18} />{v}</button>)}</div>
+                <div className="mode">{Object.entries(MODES).map(([k, v]) => <button key={k} aria-pressed={(day.mode || 'WALKING') === k} onClick={() => up((_, __, d) => { d.mode = k; d.lm = {}; })}><Ic n={MI[k]} s={18} />{v}</button>)}</div>
                 <div className="menuw">
                   <button className="ib fill" aria-label="Day options" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}><Ic n="dots" /></button>
                   {menu && <>
@@ -456,11 +456,6 @@ export default function Page() {
                 </div>
               </div>
               <div className="stats"><div className="stat"><b>{places.length}</b><small>stops</small></div><div className="stat"><b>{total ? '~' + fmt(total) : '—'}</b><small>travel time</small></div><div className="stat"><b>{trip.cc}{cost}</b><small>budget</small></div></div>
-              <button className="daynote" onClick={() => { setNs(s.day); setView('notes'); }}>
-                <Ic n="note" />
-                <span className="dn"><b>Day {s.day + 1} notes &amp; to-do</b><span {...A(day.notes)}>{day.notes.trim() || (day.todos.length ? `${day.todos.length} task${day.todos.length > 1 ? 's' : ''}` : 'Add notes or tasks for this day')}</span></span>
-                {openTasks > 0 && <span className="badge">{openTasks}</span>}
-              </button>
               {ok && <Search onPick={addPlace} />}
               <div style={{ height: 14 }} />
               {!places.length && <div className="empty">No stops for Day {s.day + 1} yet.<br />Search a place above, or tap + to add one.</div>}
@@ -476,16 +471,16 @@ export default function Page() {
               {!trip.wish.length && <p className="sum">Save a stop from its edit panel to keep it for later.</p>}
               {trip.wish.map((p, i) => <div className="card" key={p.id} style={{ marginBottom: 8 }}><div className="pl" style={{ alignItems: 'center' }}><div className="main" style={{ cursor: 'default' }}><b {...A(p.name)} className="bd">{p.name}</b><small {...A(p.addr)}>{p.addr}</small></div>
                 <button className="ghost" style={{ margin: '8px 0' }} onClick={() => { addPlace({ ...p, id: uid() }); }}>+ Day {s.day + 1}</button>
-                <button className="ib" onClick={() => up((_, t) => { t.wish.splice(i, 1); })} aria-label="Delete"><Ic n="x" /></button></div></div>)}
+                <button className="ib" onClick={() => setDlg({ title: 'Remove from wish list?', text: p.name, label: 'Remove', danger: true, ok: () => up((_, t) => { t.wish = t.wish.filter((w) => w.id !== p.id); }) })} aria-label="Delete"><Ic n="x" /></button></div></div>)}
             </>}
           </>}
 
           {view === 'notes' && <>
-            <div className="tabs" role="tablist">{['trip', ...trip.days.map((_, i) => i)].map((k) => <button key={k} role="tab" className="tab" aria-selected={sc === k} onClick={() => setNs(k)}>{k === 'trip' ? 'Trip' : `Day ${k + 1}`}</button>)}</div>
+            <div className="tabs" role="tablist">{['trip', ...trip.days.map((_, i) => i)].map((k) => <button key={k} role="tab" className="tab" aria-selected={sc === k} onClick={() => { if (k === 'trip') setNs('trip'); else { setNs('day'); up((c) => { c.day = k; }); } }}>{k === 'trip' ? 'Trip' : `Day ${k + 1}`}</button>)}</div>
             <h2 className="sec" style={{ marginTop: 6 }}>{sc === 'trip' ? 'Trip notes' : `Day ${sc + 1} notes`}</h2>
-            <textarea key={sc} {...A(nobj.notes)} rows="7" placeholder={sc === 'trip' ? 'Bookings, reminders, phrases… use #tags' : 'Plans, reservations, reminders for this day…'} value={nobj.notes} onChange={(e) => upN((o) => { o.notes = e.target.value; })} />
+            <textarea key={nobj.id} {...A(nobj.notes)} rows="7" placeholder={sc === 'trip' ? 'Bookings, reminders, phrases… use #tags' : 'Plans, reservations, reminders for this day…'} value={nobj.notes} onChange={(e) => upN((o) => { o.notes = e.target.value; })} />
             <h2 className="sec">To-do</h2>
-            <Todos key={sc} items={nobj.todos} set={(fn) => upN((o) => { o.todos = fn(o.todos); })} />
+            <Todos key={nobj.id} items={nobj.todos} set={(fn) => upN((o) => { o.todos = fn(o.todos); })} del={delTask} />
           </>}
 
           {view === 'more' && <>
