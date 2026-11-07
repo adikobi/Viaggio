@@ -25,6 +25,9 @@ const gmaps = (o, d, m) => `https://www.google.com/maps/dir/?api=1${o ? '&origin
 const TTL = 30 * 864e5; // cached leg times stay valid 30 days
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const project = (v, d = 0.99) => (v / 1000) * d / (1 - d);
+const tick = (ms = 8) => { try { navigator.vibrate?.(ms); } catch {} };
+/* Apple-style rubber band: resistance grows the further past the edge you drag */
+const band = (over, dim, c = 0.55) => (over * dim * c) / (dim + c * Math.abs(over));
 let mapsP, fbP;
 const loadMaps = () => (mapsP ||= new Promise((res, rej) => {
   if (window.google?.maps) return res();
@@ -316,18 +319,22 @@ export default function Page() {
     const g = sheet.current; if (!g) return;
     const dy = g.y0 - e.clientY; if (!g.moved && Math.abs(dy) < 5) return;
     if (!g.moved) { g.moved = true; app.current.dataset.drag = ''; }
-    let v = g.v0 + dy; if (v > g.max) v = g.max + (v - g.max) * .2; if (v < g.min) v = g.min - (g.min - v) * .2;
+    let v = g.v0 + dy; if (v > g.max) v = g.max + band(v - g.max, 220); if (v < g.min) v = g.min - band(g.min - v, 220);
     g.pts.push([performance.now(), e.clientY]); if (g.pts.length > 6) g.pts.shift();
     app.current.style.setProperty('--vis', v + 'px'); g.v = v;
   };
   const onSheetUp = () => {
     const g = sheet.current; sheet.current = null; if (!g) return;
     delete app.current.dataset.drag;
-    if (!g.moved) { g.tap && setSnap((x) => (x === 'peek' ? 'half' : x === 'half' ? 'full' : 'peek')); return; }
+    if (!g.moved) { delete app.current.dataset.fling; g.tap && tick(6); g.tap && setSnap((x) => (x === 'peek' ? 'half' : x === 'half' ? 'full' : 'peek')); return; }
     const [t0, y0] = g.pts[0], [t1, y1] = g.pts.at(-1), vel = t1 > t0 ? (y0 - y1) / (t1 - t0) * 1000 : 0; // px/s, up positive
     const proj = Math.max(g.min, Math.min(g.max, g.v + project(vel)));
     const best = Object.entries(g.snaps).sort((a, b) => Math.abs(a[1] - proj) - Math.abs(b[1] - proj))[0][0];
-    app.current.style.removeProperty('--vis'); setSnap(best);
+    app.current.style.removeProperty('--vis');
+    const el = app.current;
+    if (Math.abs(vel) > 600) { el.dataset.fling = ''; setTimeout(() => delete el.dataset.fling, 750); } else delete el.dataset.fling;
+    if (best !== snap) tick();
+    setSnap(best);
   };
 
   /* ---------- desktop resizer ---------- */
@@ -388,9 +395,10 @@ export default function Page() {
     <div className={'card' + (drag === i ? ' drag' : '')} draggable={desk && open !== p.id} onDragStart={() => setDrag(i)} onDragEnd={() => setDrag(null)} onDragOver={(e) => e.preventDefault()} onDrop={() => drag !== null && move(drag, i)}>
       <div className="pl">
         <div className="main" onClick={() => setOpen(open === p.id ? null : p.id)}>
+          {p.time && <span className="tm">{p.time}</span>}
           <b {...A(p.name)} className="bd">{p.name}</b>
           {p.sub && <span {...A(p.sub)} className="sub bd">{p.sub}</span>}
-          {(p.time || p.cost > 0) && <small className="meta">{[p.time, p.cost > 0 ? trip.cc + p.cost : ''].filter(Boolean).join(' · ')}</small>}
+          {p.cost > 0 && <small className="meta">{trip.cc}{p.cost}</small>}
           <div className="tgs">{tagsOf(p).map((t) => <button key={t} className="tg" onClick={(e) => { e.stopPropagation(); setQ('#' + t); }}>#{t}</button>)}</div>
         </div>
         <a className="ib navme" href={gmaps(null, p, i > 0 ? modes[i - 1] : day.mode || 'WALKING')} target="_blank" rel="noopener" aria-label="Navigate from current location" title="Navigate from current location" onClick={(e) => e.stopPropagation()}><Ic n="loc" s={18} /></a>
