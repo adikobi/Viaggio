@@ -461,8 +461,6 @@ export default function Page() {
                 <div style={{ height: 14 }} />
                 {!trip.wish.length && <p className="sum">General places for the whole trip. Search above, or save a stop from its edit panel.</p>}
                 {trip.wish.map(wishCard)}
-                  <button className="ghost" style={{ margin: '8px 0' }} onClick={() => addToDay({ ...p, id: uid() })}>+ Day {s.day + 1}</button>
-                  <button className="ib" onClick={() => confirmDel('Remove location?', p.name, 'Remove', 'Location removed', () => up((_, t) => { t.wish = t.wish.filter((w) => w.id !== p.id); }))} aria-label="Delete"><Ic n="x" /></button></div></div>)}
               </> : <>
               <div className="row tr" style={{ justifyContent: 'flex-end' }}>
                 <button className="ib fill" onClick={refreshLegs} aria-label="Recalculate travel times" title="Recalculate travel times"><Ic n="retry" /></button>
