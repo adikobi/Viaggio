@@ -7,7 +7,7 @@ const hsans = Heebo({ subsets: ['hebrew', 'latin'], variable: '--hsans', display
 export const metadata = { title: 'Viaggio — Trip Planner', description: 'Plan, map and carry your itinerary offline.' };
 export const viewport = {
   width: 'device-width', initialScale: 1, viewportFit: 'cover',
-  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#f7f1e8' }, { media: '(prefers-color-scheme: dark)', color: '#16100d' }],
+  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#f5efe6' }, { media: '(prefers-color-scheme: dark)', color: '#1a1310' }],
 };
 export default function Root({ children }) {
   return <html lang="en" suppressHydrationWarning className={`${serif.variable} ${hserif.variable} ${sans.variable} ${hsans.variable}`}><body>{children}</body></html>;
