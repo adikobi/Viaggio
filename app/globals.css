@@ -197,3 +197,9 @@ gmp-place-autocomplete{width:100%;min-height:52px;color-scheme:light dark;border
 .iw a{display:inline-block;margin-top:8px;color:#8f3718;font-weight:600;text-decoration:none}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 .tr>input{flex:1;min-width:0}
+
+.dtl{display:block;width:100%;margin:2px 0 14px;padding:4px 8px;min-height:0;border:0;border-radius:12px;background:transparent;text-align:center;font:500 28px/1.2 var(--serif),var(--hserif),serif;letter-spacing:-.01em;color:var(--ink);text-overflow:ellipsis}
+.dtl::placeholder{color:var(--mut);opacity:.6}
+.dtl:focus{outline:0;background:var(--soft)}
+input.dtl{font-size:28px!important}
+.pl .navme{flex:none;color:var(--acc2)}

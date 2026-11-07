@@ -379,6 +379,11 @@ export default function Page() {
     </div>;
   };
 
+  const wishCard = (p) => <div className="card" key={p.id} style={{ marginBottom: 8 }}><div className="pl" style={{ alignItems: 'center' }}><div className="main" style={{ cursor: 'default' }}><b {...A(p.name)} className="bd">{p.name}</b><small {...A(p.addr)}>{p.addr}</small></div>
+    <a className="ib navme" href={gmaps(null, p, 'WALKING')} target="_blank" rel="noopener" aria-label="Navigate from current location" title="Navigate from current location"><Ic n="loc" s={18} /></a>
+    <button className="ghost" style={{ margin: '8px 0' }} onClick={() => addToDay({ ...p, id: uid() })}>+ Day {s.day + 1}</button>
+    <button className="ib" onClick={() => confirmDel('Remove location?', p.name, 'Remove', 'Location removed', () => up((_, t) => { t.wish = t.wish.filter((w) => w.id !== p.id); }))} aria-label="Delete"><Ic n="x" /></button></div></div>;
+
   const stop = (p, i) => (
     <div className={'card' + (drag === i ? ' drag' : '')} draggable={desk && open !== p.id} onDragStart={() => setDrag(i)} onDragEnd={() => setDrag(null)} onDragOver={(e) => e.preventDefault()} onDrop={() => drag !== null && move(drag, i)}>
       <div className="pl">
@@ -388,6 +393,7 @@ export default function Page() {
           {(p.time || p.cost > 0) && <small className="meta">{[p.time, p.cost > 0 ? trip.cc + p.cost : ''].filter(Boolean).join(' · ')}</small>}
           <div className="tgs">{tagsOf(p).map((t) => <button key={t} className="tg" onClick={(e) => { e.stopPropagation(); setQ('#' + t); }}>#{t}</button>)}</div>
         </div>
+        <a className="ib navme" href={gmaps(null, p, i > 0 ? modes[i - 1] : day.mode || 'WALKING')} target="_blank" rel="noopener" aria-label="Navigate from current location" title="Navigate from current location" onClick={(e) => e.stopPropagation()}><Ic n="loc" s={18} /></a>
         <button className="ib chev" aria-expanded={open === p.id} aria-label="Edit stop" onClick={() => setOpen(open === p.id ? null : p.id)}><Ic n="chev" /></button>
       </div>
       {open === p.id && <div className="det">
@@ -440,9 +446,10 @@ export default function Page() {
 
         <div className="body"><div className="wrap">
           {!online && <div className="off">Offline — itinerary and saved routes available</div>}
+          {hasTabs && (tm ? <h1 className="dtl">Travel locations</h1> : <input key={day.id} className="dtl" {...A(day.title)} maxLength={80} value={day.title || ''} placeholder={`Day ${s.day + 1}`} aria-label="Day title" enterKeyHint="done" onChange={(e) => up((_, __, d) => { d.title = e.target.value; })} />)}
           <div className="seg">{[['plan', 'Plan'], ['notes', 'Notes'], ['more', 'More']].map(([k, v]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{v}</button>)}</div>
 
-          {view === 'plan' && <>
+          {view === 'plan' && <div key={'plan:' + sc}>
             <div className="find"><Ic n="search" /><input {...A(q)} placeholder="Filter stops or #tags…" value={q} onChange={(e) => setQ(e.target.value)} enterKeyHint="search" /></div>
             {hits ? <>
               {hits.map(({ p, di, pi }) => <div className="card" key={p.id} onClick={() => { setNs('day'); up((c) => { c.day = di; }); setQ(''); }} style={{ cursor: 'pointer', marginBottom: 8 }}><div className="main"><b {...A(p.name)} className="bd">{p.name}</b><small>Day {di + 1} · stop {pi + 1}{p.sub ? ' · ' + p.sub : ''}</small></div></div>)}
@@ -453,12 +460,11 @@ export default function Page() {
                 {ok && <Search onPick={addPlace} />}
                 <div style={{ height: 14 }} />
                 {!trip.wish.length && <p className="sum">General places for the whole trip. Search above, or save a stop from its edit panel.</p>}
-                {trip.wish.map((p) => <div className="card" key={p.id} style={{ marginBottom: 8 }}><div className="pl" style={{ alignItems: 'center' }}><div className="main" style={{ cursor: 'default' }}><b {...A(p.name)} className="bd">{p.name}</b><small {...A(p.addr)}>{p.addr}</small></div>
+                {trip.wish.map(wishCard)}
                   <button className="ghost" style={{ margin: '8px 0' }} onClick={() => addToDay({ ...p, id: uid() })}>+ Day {s.day + 1}</button>
                   <button className="ib" onClick={() => confirmDel('Remove location?', p.name, 'Remove', 'Location removed', () => up((_, t) => { t.wish = t.wish.filter((w) => w.id !== p.id); }))} aria-label="Delete"><Ic n="x" /></button></div></div>)}
               </> : <>
-              <div className="row tr">
-                <input {...A(day.title)} maxLength={80} value={day.title || ''} placeholder={`Day ${s.day + 1} title (optional)`} aria-label="Day title" onChange={(e) => up((_, __, d) => { d.title = e.target.value; })} />
+              <div className="row tr" style={{ justifyContent: 'flex-end' }}>
                 <button className="ib fill" onClick={refreshLegs} aria-label="Recalculate travel times" title="Recalculate travel times"><Ic n="retry" /></button>
                 <div className="menuw">
                   <button className="ib fill" aria-label="Day options" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}><Ic n="dots" /></button>
@@ -484,18 +490,21 @@ export default function Page() {
                 {i < places.length - 1 && leg(p, places[i + 1], i)}
               </Fragment>)}</div>
               {places.length > 1 && <button className="btn full" style={{ marginTop: 18 }} onClick={share}><Ic n="share" />Share day in Google Maps</button>}
+              <h2 className="sec">Travel locations · wish list</h2>
+              {!trip.wish.length && <p className="sum">Saved places for the whole trip appear on every day. Save a stop from its edit panel.</p>}
+              {trip.wish.map(wishCard)}
               </>}
             </>}
-          </>}
+          </div>}
 
-          {view === 'notes' && <>
+          {view === 'notes' && <div key={'notes:' + sc}>
             <h2 className="sec" style={{ marginTop: 6 }}>{tm ? 'Travel notes · whole trip' : `Day ${sc + 1}${nobj.title ? ' · ' + nobj.title : ''} notes`}</h2>
             <textarea key={nobj.id} {...A(nobj.notes)} rows="7" placeholder={tm ? 'Bookings, reminders, phrases… use #tags' : 'Plans, reservations, reminders for this day…'} value={nobj.notes} onChange={(e) => upN((o) => { o.notes = e.target.value; })} />
             <h2 className="sec">To-do</h2>
             <Todos key={nobj.id} items={nobj.todos} set={(fn) => upN((o) => { o.todos = fn(o.todos); })} del={delTask} />
-          </>}
+          </div>}
 
-          {view === 'more' && <>
+          {view === 'more' && <div key="more">
             <h2 className="sec" style={{ marginTop: 6 }}>Account sync</h2>
             {!FB.apiKey ? <p className="sum">Firebase not configured — see README. Data is stored on this device only.</p> : user
               ? <div className="row"><span className="sum" style={{ margin: 0, flex: 1 }}>Synced as {user.email}</span><button className="ghost" onClick={signOut}>Sign out</button></div>
@@ -508,7 +517,7 @@ export default function Page() {
             </div>
             <h2 className="sec">Backup</h2>
             <div className="row"><button className="ghost" onClick={backup}>Export JSON</button><label className="ghost">Import JSON<input type="file" accept="application/json" onChange={restore} hidden /></label></div>
-          </>}
+          </div>}
         </div></div>
       </section>
       {ok && <button className="addfab" aria-label={`Add a place to ${tm ? 'Travel locations' : 'Day ' + (s.day + 1)}`} onClick={() => setAdding(true)}><Ic n="plus" s={26} /></button>}
