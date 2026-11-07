@@ -7,11 +7,11 @@ const CATS = ['Sightseeing', 'Food', 'Lodging', 'Transport', 'Shopping', 'Other'
 const MODES = { DRIVING: 'Drive', WALKING: 'Walk', TRANSIT: 'Transit' };
 const MC = { DRIVING: '#b34a26', WALKING: '#2f7a5b', TRANSIT: '#3b6fb0' };
 const SPD = { DRIVING: 40, WALKING: 5, TRANSIT: 22 };
-const newDay = () => ({ id: uid(), places: [], notes: '', todos: [], mode: 'WALKING', lm: {} });
+const newDay = () => ({ id: uid(), title: '', places: [], notes: '', todos: [], mode: 'WALKING', lm: {} });
 const newTrip = (name) => ({ id: uid(), name, cc: '€', notes: '', todos: [], days: [newDay()], wish: [] });
 const norm = (v) => {
   v.ts ||= 1;
-  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.days.forEach((d) => { d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; }); });
+  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.days.forEach((d) => { d.title ??= ''; d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; }); });
   return v;
 };
 const modeOf = (d, a, z) => d?.lm?.[a.id + '>' + z.id] || d?.mode || 'WALKING';
@@ -22,6 +22,7 @@ const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const A = (t) => ({ dir: 'auto', lang: /[\u0590-\u05FF]/.test(t || '') ? 'he' : undefined });
 const tagsOf = (p) => [...new Set([p.cat.toLowerCase(), ...((p.note || '').match(/#[\p{L}\p{N}_]+/gu) || []).map((t) => t.slice(1).toLowerCase())])];
 const gmaps = (o, d, m) => `https://www.google.com/maps/dir/?api=1${o ? '&origin=' + ll(o) : ''}&destination=${ll(d)}&travelmode=${m.toLowerCase()}`;
+const TTL = 30 * 864e5; // cached leg times stay valid 30 days
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const project = (v, d = 0.99) => (v / 1000) * d / (1 - d);
 let mapsP, fbP;
@@ -132,7 +133,7 @@ export default function Page() {
   const [ok, setOk] = useState(!!K);
   const [ready, setReady] = useState(false);
   const [view, setView] = useState('plan');
-  const [ns, setNs] = useState('trip');
+  const [ns, setNs] = useState('day');
   const [q, setQ] = useState('');
   const [online, setOnline] = useState(true);
   const [user, setUser] = useState(null);
@@ -180,8 +181,11 @@ export default function Page() {
   const move = (a, b) => up((_, __, d) => { if (b >= 0 && b < d.places.length) d.places.splice(b, 0, d.places.splice(a, 1)[0]); });
   const say = (msg, act, fn) => setToast({ msg, act, fn });
   const undoable = (msg, fn) => { const prev = sRef.current; fn(); say(msg, 'Undo', () => setS({ ...prev, ts: Date.now() })); };
-  const addPlace = (p) => { up((_, __, d) => { d.places.push(p); }); say(`Added to Day ${(sRef.current?.day || 0) + 1}`); };
+  const addToDay = (p) => { up((_, __, d) => { d.places.push(p); }); say(`Added to Day ${(sRef.current?.day || 0) + 1}`); };
+  const addPlace = (p) => { if (ns === 'trip') { up((_, t) => { t.wish.push(p); }); say('Added to Travel locations'); } else addToDay(p); };
+  const confirmDel = (title, text, label, msg, fn) => setDlg({ title, text, label, danger: true, ok: () => undoable(msg, fn) });
   const retryLegs = () => { miss.current.clear(); setRetry((n) => n + 1); };
+  const refreshLegs = () => { places.slice(0, -1).forEach((a, i) => { delete cache.current[legKey(a, places[i + 1], modes[i])]; }); retryLegs(); say('Recalculating travel times'); };
 
   const modes = places.slice(0, -1).map((a, i) => modeOf(day, a, places[i + 1]));
   const legKey = (a, z, m) => m + ll(a) + '>' + ll(z);
@@ -254,14 +258,17 @@ export default function Page() {
         : { map: m, path: r.path, strokeColor: col, strokeWeight: 5, strokeOpacity: 0.85 }));
     };
     (async () => {
-      const { Route } = await google.maps.importLibrary('routes');
-      if (dead) return;
+      let RP; const getRoute = () => (RP ||= google.maps.importLibrary('routes').then((l) => l.Route)); // only loaded if a fetch is needed
       const run = async (j) => {
-        let r = cache.current[j.key];
-        if (!r && navigator.onLine && !miss.current.has(j.key)) {
-          r = await fetchLeg(Route, j.a, j.z, j.mode);
-          if (r === false) miss.current.add(j.key);
-          if (r) cache.current[j.key] = r;
+        const old = cache.current[j.key];
+        if (old && !old.at) old.at = Date.now();
+        const fresh = old && Date.now() - old.at < TTL;
+        let r = old && !old.none ? old : null; // stale data still beats an estimate
+        if (!fresh && navigator.onLine && !miss.current.has(j.key)) {
+          const f = await fetchLeg(await getRoute(), j.a, j.z, j.mode);
+          if (f === false) { cache.current[j.key] = { none: true, at: Date.now() }; r = null; }
+          else if (f) { cache.current[j.key] = { ...f, at: Date.now() }; r = f; }
+          else miss.current.add(j.key);
         }
         if (dead) return;
         r = r || est(j.a, j.z, j.mode);
@@ -344,17 +351,17 @@ export default function Page() {
   const signIn = () => fb().then(({ A: Au, auth }) => Au.signInWithPopup(auth, new Au.GoogleAuthProvider()));
   const signOut = () => fb().then(({ A: Au, auth }) => Au.signOut(auth));
   const showOn = (p) => { if (!map.current) return; map.current.panTo(p); map.current.setZoom(15); if (!desk) setSnap('peek'); else if (dsk === 'list') setDsk('split'); };
-  const hasTabs = view === 'plan' && !hits;
+  const hasTabs = (view === 'plan' && !hits) || view === 'notes';
   const peekOrList = snap === 'peek';
-  const sc = ns === 'trip' ? 'trip' : Math.min(s.day, trip.days.length - 1);
+  const tm = ns === 'trip', sc = tm ? 'trip' : Math.min(s.day, trip.days.length - 1);
   const nobj = sc === 'trip' ? trip : trip.days[sc];
   const upN = (fn) => up((c, t) => fn(sc === 'trip' ? t : t.days[c.day]));
-  const delTask = (t) => setDlg({ title: 'Delete task?', text: t.text, label: 'Delete', danger: true, ok: () => upN((o) => { o.todos = o.todos.filter((x) => x.id !== t.id); }) });
+  const delTask = (t) => confirmDel('Delete task?', t.text, 'Delete', 'Task deleted', () => upN((o) => { o.todos = o.todos.filter((x) => x.id !== t.id); }));
   const moveDay = (dir) => up((c, t) => { const i = c.day, j = i + dir; if (j >= 0 && j < t.days.length) { t.days.splice(j, 0, t.days.splice(i, 1)[0]); c.day = j; } });
   const removeDay = () => {
     if (trip.days.length < 2) return say('A trip needs at least one day');
     const rm = () => up((c, t) => { t.days.splice(c.day, 1); c.day = Math.max(0, c.day - 1); });
-    places.length || day.notes.trim() || day.todos.length ? setDlg({ title: `Remove Day ${s.day + 1}?`, text: 'Its stops, notes and tasks will be deleted.', label: 'Remove', danger: true, ok: () => undoable('Day removed', rm) }) : rm();
+    confirmDel(`Remove Day ${s.day + 1}${day.title ? ' · ' + day.title : ''}?`, 'Its stops, notes and tasks will be deleted.', 'Remove', 'Day removed', rm);
   };
 
   const ViewSwitch = () => <div className="vs" role="group" aria-label="Layout">{[['list', 'list', 'List'], ['split', 'split', 'Split'], ['map', 'map', 'Map']].map(([k, ic, l]) => <button key={k} aria-pressed={dsk === k} aria-label={l} title={l} onClick={() => setDsk(k)}><Ic n={ic} /></button>)}</div>;
@@ -395,8 +402,8 @@ export default function Page() {
           <button className="act" onClick={() => move(i, i - 1)} disabled={i === 0}><Ic n="up" />Up</button>
           <button className="act" onClick={() => move(i, i + 1)} disabled={i === places.length - 1}><Ic n="down" />Down</button>
           <button className="act" onClick={() => showOn(p)}><Ic n="pin" />On map</button>
-          <button className="act" onClick={() => { up((_, t) => { t.wish.push({ ...p, id: uid() }); }); say('Saved to wish list'); }}><Ic n="heart" />Save</button>
-          <button className="act danger" onClick={() => undoable('Stop removed', () => up((_, __, d) => { d.places.splice(i, 1); }))}><Ic n="trash" />Remove</button>
+          <button className="act" onClick={() => { up((_, t) => { t.wish.push({ ...p, id: uid() }); }); say('Saved to Travel locations'); }}><Ic n="heart" />Save</button>
+          <button className="act danger" onClick={() => confirmDel('Remove stop?', p.name, 'Remove', 'Stop removed', () => up((_, __, d) => { d.places.splice(i, 1); }))}><Ic n="trash" />Remove</button>
         </div>
       </div>}
     </div>
@@ -425,8 +432,9 @@ export default function Page() {
             <button className="ib fill" onClick={() => setDlg({ title: 'New trip', input: '', ph: 'e.g. Rome', label: 'Create', ok: (n) => up((c) => { c.trips.push(newTrip(n)); c.cur = c.trips.length - 1; c.day = 0; }) })} aria-label="New trip"><Ic n="plus" /></button>
           </div>
           {hasTabs && <div className="tabs" role="tablist">
-            {trip.days.map((d, i) => <button key={d.id} role="tab" className="tab" aria-selected={i === s.day} onClick={() => up((c) => { c.day = i; })}>Day {i + 1}</button>)}
-            <button className="tab" onClick={() => up((c, t) => { t.days.push(newDay()); c.day = t.days.length - 1; })}><Ic n="plus" s={16} />Day</button>
+            <button role="tab" className="tab" aria-selected={tm} onClick={() => setNs('trip')}><Ic n="pin" s={16} />Travel</button>
+            {trip.days.map((d, i) => <button key={d.id} role="tab" className="tab" aria-selected={!tm && i === s.day} onClick={() => { setNs('day'); up((c) => { c.day = i; }); }}>Day {i + 1}</button>)}
+            <button className="tab" onClick={() => { setNs('day'); up((c, t) => { t.days.push(newDay()); c.day = t.days.length - 1; }); }}><Ic n="plus" s={16} />Day</button>
           </div>}
         </div>
 
@@ -437,12 +445,21 @@ export default function Page() {
           {view === 'plan' && <>
             <div className="find"><Ic n="search" /><input {...A(q)} placeholder="Filter stops or #tags…" value={q} onChange={(e) => setQ(e.target.value)} enterKeyHint="search" /></div>
             {hits ? <>
-              {hits.map(({ p, di, pi }) => <div className="card" key={p.id} onClick={() => { up((c) => { c.day = di; }); setQ(''); }} style={{ cursor: 'pointer', marginBottom: 8 }}><div className="main"><b {...A(p.name)} className="bd">{p.name}</b><small>Day {di + 1} · stop {pi + 1}{p.sub ? ' · ' + p.sub : ''}</small></div></div>)}
+              {hits.map(({ p, di, pi }) => <div className="card" key={p.id} onClick={() => { setNs('day'); up((c) => { c.day = di; }); setQ(''); }} style={{ cursor: 'pointer', marginBottom: 8 }}><div className="main"><b {...A(p.name)} className="bd">{p.name}</b><small>Day {di + 1} · stop {pi + 1}{p.sub ? ' · ' + p.sub : ''}</small></div></div>)}
               {!hits.length && <p className="sum">No matches.</p>}
             </> : <>
+              {tm ? <>
+                <h2 className="sec" style={{ marginTop: 6 }}>Travel locations</h2>
+                {ok && <Search onPick={addPlace} />}
+                <div style={{ height: 14 }} />
+                {!trip.wish.length && <p className="sum">General places for the whole trip. Search above, or save a stop from its edit panel.</p>}
+                {trip.wish.map((p) => <div className="card" key={p.id} style={{ marginBottom: 8 }}><div className="pl" style={{ alignItems: 'center' }}><div className="main" style={{ cursor: 'default' }}><b {...A(p.name)} className="bd">{p.name}</b><small {...A(p.addr)}>{p.addr}</small></div>
+                  <button className="ghost" style={{ margin: '8px 0' }} onClick={() => addToDay({ ...p, id: uid() })}>+ Day {s.day + 1}</button>
+                  <button className="ib" onClick={() => confirmDel('Remove location?', p.name, 'Remove', 'Location removed', () => up((_, t) => { t.wish = t.wish.filter((w) => w.id !== p.id); }))} aria-label="Delete"><Ic n="x" /></button></div></div>)}
+              </> : <>
               <div className="row tr">
-                <span className="lbl">Travel by</span>
-                <div className="mode">{Object.entries(MODES).map(([k, v]) => <button key={k} aria-pressed={(day.mode || 'WALKING') === k} onClick={() => up((_, __, d) => { d.mode = k; d.lm = {}; })}><Ic n={MI[k]} s={18} />{v}</button>)}</div>
+                <input {...A(day.title)} maxLength={80} value={day.title || ''} placeholder={`Day ${s.day + 1} title (optional)`} aria-label="Day title" onChange={(e) => up((_, __, d) => { d.title = e.target.value; })} />
+                <button className="ib fill" onClick={refreshLegs} aria-label="Recalculate travel times" title="Recalculate travel times"><Ic n="retry" /></button>
                 <div className="menuw">
                   <button className="ib fill" aria-label="Day options" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}><Ic n="dots" /></button>
                   {menu && <>
@@ -467,18 +484,13 @@ export default function Page() {
                 {i < places.length - 1 && leg(p, places[i + 1], i)}
               </Fragment>)}</div>
               {places.length > 1 && <button className="btn full" style={{ marginTop: 18 }} onClick={share}><Ic n="share" />Share day in Google Maps</button>}
-              <h2 className="sec">Wish list</h2>
-              {!trip.wish.length && <p className="sum">Save a stop from its edit panel to keep it for later.</p>}
-              {trip.wish.map((p, i) => <div className="card" key={p.id} style={{ marginBottom: 8 }}><div className="pl" style={{ alignItems: 'center' }}><div className="main" style={{ cursor: 'default' }}><b {...A(p.name)} className="bd">{p.name}</b><small {...A(p.addr)}>{p.addr}</small></div>
-                <button className="ghost" style={{ margin: '8px 0' }} onClick={() => { addPlace({ ...p, id: uid() }); }}>+ Day {s.day + 1}</button>
-                <button className="ib" onClick={() => setDlg({ title: 'Remove from wish list?', text: p.name, label: 'Remove', danger: true, ok: () => up((_, t) => { t.wish = t.wish.filter((w) => w.id !== p.id); }) })} aria-label="Delete"><Ic n="x" /></button></div></div>)}
+              </>}
             </>}
           </>}
 
           {view === 'notes' && <>
-            <div className="tabs" role="tablist">{['trip', ...trip.days.map((_, i) => i)].map((k) => <button key={k} role="tab" className="tab" aria-selected={sc === k} onClick={() => { if (k === 'trip') setNs('trip'); else { setNs('day'); up((c) => { c.day = k; }); } }}>{k === 'trip' ? 'Trip' : `Day ${k + 1}`}</button>)}</div>
-            <h2 className="sec" style={{ marginTop: 6 }}>{sc === 'trip' ? 'Trip notes' : `Day ${sc + 1} notes`}</h2>
-            <textarea key={nobj.id} {...A(nobj.notes)} rows="7" placeholder={sc === 'trip' ? 'Bookings, reminders, phrases… use #tags' : 'Plans, reservations, reminders for this day…'} value={nobj.notes} onChange={(e) => upN((o) => { o.notes = e.target.value; })} />
+            <h2 className="sec" style={{ marginTop: 6 }}>{tm ? 'Travel notes · whole trip' : `Day ${sc + 1}${nobj.title ? ' · ' + nobj.title : ''} notes`}</h2>
+            <textarea key={nobj.id} {...A(nobj.notes)} rows="7" placeholder={tm ? 'Bookings, reminders, phrases… use #tags' : 'Plans, reservations, reminders for this day…'} value={nobj.notes} onChange={(e) => upN((o) => { o.notes = e.target.value; })} />
             <h2 className="sec">To-do</h2>
             <Todos key={nobj.id} items={nobj.todos} set={(fn) => upN((o) => { o.todos = fn(o.todos); })} del={delTask} />
           </>}
@@ -492,17 +504,17 @@ export default function Page() {
             <div className="fld"><span className="lbl">Currency</span><Chips opts={['€', '$', '£', '₪']} val={trip.cc} on={(v) => up((_, t) => { t.cc = v; })} /></div>
             <div className="row" style={{ marginTop: 14 }}>
               <button className="ghost" onClick={() => up((c) => { c.theme = c.theme === 'dark' ? 'light' : 'dark'; })}><Ic n="moon" />{s.theme === 'dark' ? 'Light theme' : 'Dark theme'}</button>
-              <button className="ghost danger" onClick={() => s.trips.length > 1 ? setDlg({ title: `Delete “${trip.name}”?`, text: 'This removes all its days, notes and tasks.', label: 'Delete', danger: true, ok: () => undoable('Trip deleted', () => up((c) => { c.trips.splice(c.cur, 1); c.cur = 0; c.day = 0; })) }) : say('Keep at least one trip')}><Ic n="trash" />Delete trip</button>
+              <button className="ghost danger" onClick={() => s.trips.length > 1 ? confirmDel(`Delete “${trip.name}”?`, 'This removes all its days, notes and tasks.', 'Delete', 'Trip deleted', () => up((c) => { c.trips.splice(c.cur, 1); c.cur = 0; c.day = 0; })) : say('Keep at least one trip')}><Ic n="trash" />Delete trip</button>
             </div>
             <h2 className="sec">Backup</h2>
             <div className="row"><button className="ghost" onClick={backup}>Export JSON</button><label className="ghost">Import JSON<input type="file" accept="application/json" onChange={restore} hidden /></label></div>
           </>}
         </div></div>
       </section>
-      {ok && <button className="addfab" aria-label={`Add a place to Day ${s.day + 1}`} onClick={() => setAdding(true)}><Ic n="plus" s={26} /></button>}
+      {ok && <button className="addfab" aria-label={`Add a place to ${tm ? 'Travel locations' : 'Day ' + (s.day + 1)}`} onClick={() => setAdding(true)}><Ic n="plus" s={26} /></button>}
       {toast && <div className="toast" role="status" key={toast.msg}>{toast.msg}{toast.act && <button onClick={() => { toast.fn(); setToast(null); }}>{toast.act}</button>}</div>}
       {dlg && <Dialog d={dlg} close={() => setDlg(null)} />}
-      {adding && <AddDlg label={`Day ${s.day + 1}`} onPick={addPlace} close={() => setAdding(false)} />}
+      {adding && <AddDlg label={tm ? 'Travel locations' : `Day ${s.day + 1}`} onPick={addPlace} close={() => setAdding(false)} />}
     </main>
   );
 }

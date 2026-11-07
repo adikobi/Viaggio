@@ -196,3 +196,4 @@ gmp-place-autocomplete{width:100%;min-height:52px;color-scheme:light dark;border
 .inote{margin-top:6px;padding-top:6px;border-top:1px solid rgba(0,0,0,.12);white-space:pre-wrap;font-style:italic}
 .iw a{display:inline-block;margin-top:8px;color:#8f3718;font-weight:600;text-decoration:none}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+.tr>input{flex:1;min-width:0}
