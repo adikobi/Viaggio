@@ -1,4 +1,5 @@
-:root{--bg:#f5efe6;--card:#fffdf9;--ink:#2a1f19;--mut:#76675d;--line:rgba(70,40,20,.11);--line2:rgba(70,40,20,.24);--acc:#b34a26;--acc2:#8f3718;--on:#fff;--soft:color-mix(in srgb,var(--acc) 9%,transparent);--danger:#b8321f;
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap');
+:root{--hsans: 'Heebo', sans-serif;--bg:#f5efe6;--card:#fffdf9;--ink:#2a1f19;--mut:#76675d;--line:rgba(70,40,20,.11);--line2:rgba(70,40,20,.24);--acc:#b34a26;--acc2:#8f3718;--on:#fff;--soft:color-mix(in srgb,var(--acc) 9%,transparent);--danger:#b8321f;
 --sh1:0 1px 2px rgba(60,30,10,.06);--sh2:0 8px 28px rgba(60,30,10,.18);
 --ease:cubic-bezier(.23,1,.32,1);--sheet-ease:cubic-bezier(.32,.72,0,1);--tap:44px;--top:env(safe-area-inset-top,0px);--bot:env(safe-area-inset-bottom,0px);color-scheme:light}
 [data-theme=dark]{--bg:#1a1310;--card:#271c17;--ink:#f4e9de;--mut:#b3a095;--line:rgba(255,220,190,.11);--line2:rgba(255,220,190,.26);--acc:#e47a50;--acc2:#f0a07a;--on:#1b0d07;--danger:#ff8a75;--sh1:0 1px 2px rgba(0,0,0,.3);--sh2:0 8px 28px rgba(0,0,0,.5);color-scheme:dark}
