@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useEffect, useRef, useState } from 'react';
-const KEY = 'viaggio.v1', LEGS = 'viaggio.legs', UI = 'viaggio.ui', K = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+const KEY = 'viaggio.v1', LEGS = 'viaggio.legs', UI = 'viaggio.ui', SYNC = 'viaggio.sync', K = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const FB = { apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY, authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID };
 const uid = () => Math.random().toString(36).slice(2, 9);
 const CATS = ['Sightseeing', 'Food', 'Lodging', 'Transport', 'Shopping', 'Other'];
@@ -24,6 +24,11 @@ const tagsOf = (p) => [...new Set([p.cat.toLowerCase(), ...((p.note || '').match
 const gmaps = (o, d, m) => `https://www.google.com/maps/dir/?api=1${o ? '&origin=' + ll(o) : ''}&destination=${ll(d)}&travelmode=${m.toLowerCase()}`;
 const TTL = 30 * 864e5; // cached leg times stay valid 30 days
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/* Google polyline encoding (5 decimals): a cached route is ~6x smaller than a [{lat,lng}] array, so far more routes fit in localStorage */
+const encPoly = (pts) => { let o = '', pl = 0, pn = 0; const e = (v) => { v = v < 0 ? ~(v << 1) : v << 1; while (v >= 32) { o += String.fromCharCode((32 | (v & 31)) + 63); v >>= 5; } o += String.fromCharCode(v + 63); }; for (const p of pts) { const a = Math.round(p.lat * 1e5), n = Math.round(p.lng * 1e5); e(a - pl); e(n - pn); pl = a; pn = n; } return o; };
+const decPoly = (s) => { const out = []; let i = 0, a = 0, n = 0; const d = () => { let r = 0, sh = 0, b; do { b = s.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32); return r & 1 ? ~(r >> 1) : r >> 1; }; while (i < s.length) { a += d(); n += d(); out.push({ lat: a / 1e5, lng: n / 1e5 }); } return out; };
+const pathOf = (e) => e.path || (e.enc ? decPoly(e.enc) : []);
+const slowNet = () => { const c = navigator.connection; return !!c && (c.saveData === true || /(^|-)2g$/.test(c.effectiveType || '')); };
 const project = (v, d = 0.99) => (v / 1000) * d / (1 - d);
 const tick = (ms = 8) => { try { navigator.vibrate?.(ms); } catch {} };
 /* Apple-style rubber band: resistance grows the further past the edge you drag */
@@ -33,10 +38,20 @@ const loadMaps = () => (mapsP ||= new Promise((res, rej) => {
   if (window.google?.maps) return res();
   window.__gm = res;
   const s = document.createElement('script');
-  s.src = `https://maps.googleapis.com/maps/api/js?key=${K}&v=weekly&loading=async&callback=__gm`;
+  s.src = `https://maps.googleapis.com/maps/api/js?key=${K}&v=quarterly&loading=async&callback=__gm`;
   s.onerror = () => { mapsP = null; rej(); }; document.head.append(s);
 }));
-const fb = () => (fbP ||= Promise.all([import('firebase/app'), import('firebase/auth'), import('firebase/firestore')]).then(([a, Au, F]) => { const app = a.initializeApp(FB); return { A: Au, F, auth: Au.getAuth(app), db: F.getFirestore(app) }; }));
+const fb = () => (fbP ||= Promise.all([import('firebase/app'), import('firebase/auth'), import('firebase/firestore')]).then(([a, Au, F]) => {
+  const app = a.initializeApp(FB);
+  // initializeAuth without a popup resolver: no auth iframe/gapi download on every launch (the resolver is passed at sign-in)
+  const auth = Au.initializeAuth(app, { persistence: [Au.indexedDBLocalPersistence, Au.browserLocalPersistence] });
+  // on-device Firestore cache: reconnects only download what changed, and edits made offline are queued
+  let db; try { db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) }); } catch { db = F.getFirestore(app); }
+  return { A: Au, F, auth, db };
+}).catch((e) => { fbP = null; throw e; }));
+// one shared, lazily created route-library loader
+let routeP;
+const getRoute = () => (routeP ||= loadMaps().then(() => google.maps.importLibrary('routes')).then((l) => l.Route).catch((e) => { routeP = null; throw e; }));
 
 /* straight-line fallback so a leg is never blank */
 const est = (a, z, m) => {
@@ -149,34 +164,48 @@ export default function Page() {
   const [adding, setAdding] = useState(false);
   const [menu, setMenu] = useState(false);
   const desk = useMedia('(min-width:900px)');
+  const [dsPref, setDsPref] = useState(null), [auto, setAuto] = useState(false), [wantMap, setWantMap] = useState(false), [mapErr, setMapErr] = useState(false), [mapTry, setMapTry] = useState(0);
+  const ds = dsPref ?? auto; // data saver: explicit choice, else follow the device's Data Saver / 2G state
+  const mapNote = ready ? '' : mapErr ? 'Couldn’t load the map.' : !online ? 'Offline — the map loads when you reconnect. Your itinerary and saved routes still work.' : ds && !wantMap ? 'Data saver is on, so the map isn’t loaded.' : '';
+  const mapBtn = ready ? '' : mapErr ? 'Retry' : online && ds && !wantMap ? 'Load map' : '';
+  const loadMapNow = () => { setMapErr(false); setWantMap(true); setMapTry((n) => n + 1); };
   const map = useRef(), mk = useRef([]), pl = useRef([]), cache = useRef({}), miss = useRef(new Set()), info = useRef(), openId = useRef(null), sRef = useRef(), remote = useRef(0), me = useRef();
   const app = useRef(), panel = useRef(), bnd = useRef(), fitRef = useRef(), uiLoaded = useRef(false);
+  const dirty = useRef(false), forceFor = useRef(-1), busy = useRef(false), authOff = useRef(null);
+  const watchAuth = () => fb().then(({ A: Au, auth }) => { authOff.current ||= Au.onAuthStateChanged(auth, setUser); });
   sRef.current = s;
 
   useEffect(() => {
     let v = null;
     try { v = JSON.parse(localStorage.getItem(KEY)); cache.current = JSON.parse(localStorage.getItem(LEGS)) || {}; } catch {}
-    try { const u = JSON.parse(localStorage.getItem(UI)); if (u) { u.snap && setSnap(u.snap); u.dsk && setDsk(u.dsk); u.pw && setPw(u.pw); } } catch {}
-    uiLoaded.current = true;
+    try { const u = JSON.parse(localStorage.getItem(UI)); if (u) { u.snap && setSnap(u.snap); u.dsk && setDsk(u.dsk); u.pw && setPw(u.pw); typeof u.dsPref === 'boolean' && setDsPref(u.dsPref); } } catch {}
+    uiLoaded.current = true; dirty.current = true; setAuto(slowNet()); // dirty: first persist migrates old route entries to the compact format
     setS(v?.trips ? norm(v) : { ts: 0, trips: [newTrip('Italy')], cur: 0, day: 0, theme: matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light' });
     navigator.serviceWorker?.register(`${process.env.NEXT_PUBLIC_BASE_PATH}/sw.js`).catch(() => {});
     const f = () => setOnline(navigator.onLine); f(); addEventListener('online', f); addEventListener('offline', f);
-    if (FB.apiKey) fb().then(({ A: Au, auth }) => Au.onAuthStateChanged(auth, setUser));
+    if (FB.apiKey && localStorage.getItem(SYNC)) watchAuth(); // Firebase is only loaded for people who signed in to sync
   }, []);
+  useEffect(() => { if (view === 'more' && FB.apiKey) fb().catch(() => {}); }, [view]); // warm up so the sign-in popup isn't blocked
   useEffect(() => { if (s) { localStorage.setItem(KEY, JSON.stringify(s)); document.documentElement.dataset.theme = s.theme; } }, [s]);
-  useEffect(() => { if (uiLoaded.current) try { localStorage.setItem(UI, JSON.stringify({ snap, dsk, pw })); } catch {} }, [snap, dsk, pw]);
+  useEffect(() => { if (uiLoaded.current) try { localStorage.setItem(UI, JSON.stringify({ snap, dsk, pw, dsPref })); } catch {} }, [snap, dsk, pw, dsPref]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 5000); return () => clearTimeout(t); }, [toast]);
 
   useEffect(() => {
-    if (!user) return; let off;
-    fb().then(({ F, db }) => { off = F.onSnapshot(F.doc(db, 'users', user.uid), (snapd) => { const d = snapd.data(); if (d && d.ts > (sRef.current.ts || 0)) { remote.current = d.ts; setS(norm(JSON.parse(d.json))); } }); });
-    return () => off?.();
-  }, [user]);
+    if (!user) return; let off, dead;
+    const apply = (snapd) => { const d = snapd.data(); if (d && d.ts > (sRef.current.ts || 0)) { remote.current = d.ts; setS(norm(JSON.parse(d.json))); } };
+    fb().then(({ F, db }) => {
+      if (dead) return;
+      const ref = F.doc(db, 'users', user.uid);
+      if (ds) F.getDoc(ref).then(apply).catch(() => {}); // data saver: one read per launch instead of a live connection
+      else off = F.onSnapshot(ref, apply);
+    }).catch(() => {});
+    return () => { dead = true; off?.(); };
+  }, [user, ds]);
   useEffect(() => {
     if (!user || !s || !(s.ts > remote.current)) return;
-    const t = setTimeout(() => fb().then(({ F, db }) => { remote.current = s.ts; F.setDoc(F.doc(db, 'users', user.uid), { json: JSON.stringify(s), ts: s.ts }); }), 800);
+    const t = setTimeout(() => fb().then(({ F, db }) => { remote.current = s.ts; return F.setDoc(F.doc(db, 'users', user.uid), { json: JSON.stringify(s), ts: s.ts }); }).catch(() => {}), ds ? 4000 : 800);
     return () => clearTimeout(t);
-  }, [s, user]);
+  }, [s, user, ds]);
 
   const trip = s?.trips[s.cur], day = trip && (trip.days[s.day] || trip.days[0]), places = day?.places || [];
   const up = (fn) => setS((x) => { const c = structuredClone(x); const t = c.trips[c.cur]; c.day = Math.min(c.day, t.days.length - 1); fn(c, t, t.days[c.day]); c.ts = Date.now(); return c; });
@@ -187,13 +216,60 @@ export default function Page() {
   const addToDay = (p) => { up((_, __, d) => { d.places.push(p); }); say(`Added to Day ${(sRef.current?.day || 0) + 1}`); };
   const addPlace = (p) => { if (ns === 'trip') { up((_, t) => { t.wish.push(p); }); say('Added to Travel locations'); } else addToDay(p); };
   const confirmDel = (title, text, label, msg, fn) => setDlg({ title, text, label, danger: true, ok: () => undoable(msg, fn) });
-  const retryLegs = () => { miss.current.clear(); setRetry((n) => n + 1); };
-  const refreshLegs = () => { places.slice(0, -1).forEach((a, i) => { delete cache.current[legKey(a, places[i + 1], modes[i])]; }); retryLegs(); say('Recalculating travel times'); };
+  const retryLegs = () => { miss.current.clear(); forceFor.current = retry + 1; setRetry(retry + 1); }; // an explicit tap is allowed to use data even in data saver
+  const refreshLegs = () => { places.slice(0, -1).forEach((a, i) => { delete cache.current[legKey(a, places[i + 1], modes[i])]; if (modes[i] === 'WALKING') delete cache.current[legKey(places[i + 1], a, modes[i])]; }); dirty.current = true; retryLegs(); say('Recalculating travel times'); };
 
   const modes = places.slice(0, -1).map((a, i) => modeOf(day, a, places[i + 1]));
   const legKey = (a, z, m) => m + ll(a) + '>' + ll(z);
   const rsig = places.map((p) => p.id + ll(p)).join() + '|' + modes.join();
   const msig = places.map((p) => p.id + p.name + ll(p)).join();
+
+  /* ---------- route cache: look up -> (maybe) fetch -> persist ---------- */
+  const getLeg = (a, z, m) => {
+    const c = cache.current, now = Date.now();
+    let e = c[legKey(a, z, m)];
+    if (e) { e.u = now; return e; }
+    if (m !== 'WALKING') return null; // a walk A→B is the same as B→A: reuse it instead of fetching again
+    e = c[legKey(z, a, m)];
+    if (!e) return null;
+    e.u = now;
+    return e.none ? e : { ...e, enc: undefined, path: [...pathOf(e)].reverse() };
+  };
+  const resolveLeg = async (a, z, mode, net) => {
+    const key = legKey(a, z, mode), old = getLeg(a, z, mode);
+    if (old && !old.at) old.at = Date.now();
+    const fresh = old && Date.now() - old.at < TTL;
+    let r = old && !old.none ? old : null; // stale data still beats an estimate
+    if (!fresh && net && navigator.onLine && !miss.current.has(key)) {
+      let f = null;
+      try { f = await fetchLeg(await getRoute(), a, z, mode); } catch {}
+      if (f === false) { cache.current[key] = { none: true, at: Date.now() }; dirty.current = true; r = null; }
+      else if (f) { cache.current[key] = { ...f, at: Date.now() }; dirty.current = true; r = f; }
+      else miss.current.add(key);
+    }
+    return r;
+  };
+  const persist = () => {
+    const c = cache.current; if (!dirty.current) return;
+    for (const e of Object.values(c)) if (e.path) { e.enc = encPoly(e.path); delete e.path; }
+    for (let n = 0; n < 6; n++) { // if storage is full, drop the least recently used 30%
+      try { localStorage.setItem(LEGS, JSON.stringify(c)); dirty.current = false; return; }
+      catch { const ks = Object.keys(c).sort((x, y) => (c[x].u || c[x].at || 0) - (c[y].u || c[y].at || 0)); ks.slice(0, Math.ceil(ks.length * 0.3)).forEach((k) => delete c[k]); }
+    }
+  };
+  const prepare = async () => { // download every missing route of the whole trip in one go (do this on Wi-Fi)
+    if (!navigator.onLine) return say('Connect to the internet first');
+    miss.current.clear();
+    const jobs = [...new Map(trip.days.flatMap((d) => d.places.slice(0, -1).map((a, i) => { const z = d.places[i + 1], m = modeOf(d, a, z); return [legKey(a, z, m), { a, z, m }]; }))).values()];
+    const todo = jobs.filter((j) => { const o = getLeg(j.a, j.z, j.m); return !(o && Date.now() - (o.at || 0) < TTL); });
+    if (!todo.length) return say('All routes are already saved on this device');
+    say(`Saving ${todo.length} route${todo.length > 1 ? 's' : ''}…`);
+    const q = [...todo];
+    await Promise.all(Array.from({ length: Math.min(4, q.length) }, async () => { while (q.length) { const j = q.shift(); await resolveLeg(j.a, j.z, j.m, true); } }));
+    persist(); setRetry((n) => n + 1);
+    const got = todo.filter((j) => { const o = getLeg(j.a, j.z, j.m); return o && Date.now() - (o.at || 0) < TTL; }).length;
+    say(got === todo.length ? 'Trip saved for offline use' : `Saved ${got} of ${todo.length} routes — try again with a better connection`);
+  };
 
   /* ---------- map ---------- */
   fitRef.current = () => {
@@ -204,7 +280,8 @@ export default function Page() {
     m.fitBounds(b, pad);
   };
   useEffect(() => {
-    if (!K || !s || map.current) return;
+    if (!K || !s || map.current || busy.current || mapErr || !online || (ds && !wantMap)) return; // offline or data saver: don't spend data on the map
+    busy.current = true;
     loadMaps().then(async () => {
       const { Map } = await google.maps.importLibrary('maps');
       map.current = new Map(document.getElementById('map'), { center: { lat: 42.5, lng: 12.5 }, zoom: 5, mapId: 'DEMO_MAP_ID', disableDefaultUI: true, zoomControl: false, gestureHandling: 'greedy', zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_BOTTOM } });
@@ -212,8 +289,8 @@ export default function Page() {
       info.current.addListener('closeclick', () => { openId.current = null; });
       map.current.addListener('click', () => { info.current.close(); openId.current = null; });
       setReady(true);
-    }).catch(() => setOk(false));
-  }, [!!s]);
+    }).catch(() => { busy.current = false; setMapErr(true); });
+  }, [!!s, wantMap, ds, online, mapTry]);
   useEffect(() => { map.current?.setOptions({ zoomControl: desk }); }, [desk, ready]);
 
   // markers
@@ -247,46 +324,39 @@ export default function Page() {
     return () => { dead = true; };
   }, [msig, ready]);
 
-  // routes: concurrent, retried, progressive, with estimate fallback
+  // travel times: served from the on-device cache first; the network is only used for legs that are missing or older than TTL.
+  // Works without the map, so saved times show offline and in data saver mode.
   useEffect(() => {
-    const m = map.current; if (!m || !ready) return;
     let dead = false;
-    pl.current.forEach((o) => o.setMap(null)); pl.current = [];
+    const net = !ds || ready || forceFor.current === retry;
     const jobs = places.slice(0, -1).map((a, i) => ({ a, z: places[i + 1], mode: modes[i], key: legKey(a, places[i + 1], modes[i]) }));
-    const line = (j, r) => {
-      if (dead) return;
-      const col = MC[j.mode];
-      pl.current.push(new google.maps.Polyline(r.est || j.mode === 'WALKING'
-        ? { map: m, path: r.path, strokeOpacity: 0, icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.9, strokeColor: col, scale: 3 }, offset: '0', repeat: '12px' }] }
-        : { map: m, path: r.path, strokeColor: col, strokeWeight: 5, strokeOpacity: 0.85 }));
-    };
     (async () => {
-      let RP; const getRoute = () => (RP ||= google.maps.importLibrary('routes').then((l) => l.Route)); // only loaded if a fetch is needed
-      const run = async (j) => {
-        const old = cache.current[j.key];
-        if (old && !old.at) old.at = Date.now();
-        const fresh = old && Date.now() - old.at < TTL;
-        let r = old && !old.none ? old : null; // stale data still beats an estimate
-        if (!fresh && navigator.onLine && !miss.current.has(j.key)) {
-          const f = await fetchLeg(await getRoute(), j.a, j.z, j.mode);
-          if (f === false) { cache.current[j.key] = { none: true, at: Date.now() }; r = null; }
-          else if (f) { cache.current[j.key] = { ...f, at: Date.now() }; r = f; }
-          else miss.current.add(j.key);
-        }
-        if (dead) return;
-        r = r || est(j.a, j.z, j.mode);
-        line(j, r);
-        setLegs((p) => ({ ...p, [j.key]: { d: r.d, t: r.t, est: !!r.est } }));
-      };
       const queue = [...jobs];
-      await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => { while (queue.length && !dead) await run(queue.shift()); }));
-      if (dead) return;
-      for (let n = 0; n < 4; n++) { // persist, evicting oldest entries if storage is full
-        try { localStorage.setItem(LEGS, JSON.stringify(cache.current)); break; } catch { const ks = Object.keys(cache.current); ks.slice(0, Math.ceil(ks.length * 0.3)).forEach((k) => delete cache.current[k]); }
-      }
+      await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
+        while (queue.length && !dead) {
+          const j = queue.shift(), r = (await resolveLeg(j.a, j.z, j.mode, net)) || est(j.a, j.z, j.mode);
+          if (dead) return;
+          setLegs((p) => ({ ...p, [j.key]: { d: r.d, t: r.t, est: !!r.est } }));
+        }
+      }));
+      persist(); // paid-for results are saved even if this pass was superseded
     })();
     return () => { dead = true; };
-  }, [rsig, ready, retry]);
+  }, [rsig, retry, ds, ready, online]);
+
+  // route lines: drawn from the cache (dashed straight line until a real route exists)
+  useEffect(() => {
+    const m = map.current; if (!m || !ready) return;
+    pl.current.forEach((o) => o.setMap(null)); pl.current = [];
+    places.slice(0, -1).forEach((a, i) => {
+      const z = places[i + 1], mode = modes[i], e = getLeg(a, z, mode), p = e && !e.none ? pathOf(e) : [], real = p.length > 1;
+      const path = real ? p : est(a, z, mode).path, col = MC[mode];
+      pl.current.push(new google.maps.Polyline(!real || mode === 'WALKING'
+        ? { map: m, path, strokeOpacity: 0, icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.9, strokeColor: col, scale: 3 }, offset: '0', repeat: '12px' }] }
+        : { map: m, path, strokeColor: col, strokeWeight: 5, strokeOpacity: 0.85 }));
+    });
+    return () => { pl.current.forEach((o) => o.setMap(null)); pl.current = []; };
+  }, [legs, ready, rsig]);
 
   // refit when layout changes
   useEffect(() => { if (!ready || (!desk && snap === 'full')) return; const t = setTimeout(() => fitRef.current(), 480); return () => clearTimeout(t); }, [snap, dsk, desk, ready]);
@@ -355,8 +425,8 @@ export default function Page() {
   }) : null;
   const backup = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(s)], { type: 'application/json' })); a.download = 'viaggio-backup.json'; a.click(); };
   const restore = async (e) => { try { const d = JSON.parse(await e.target.files[0].text()); if (Array.isArray(d.trips)) { setS(norm({ ...d, ts: Date.now() })); say('Backup restored'); } else throw 0; } catch { say('Invalid file'); } };
-  const signIn = () => fb().then(({ A: Au, auth }) => Au.signInWithPopup(auth, new Au.GoogleAuthProvider()));
-  const signOut = () => fb().then(({ A: Au, auth }) => Au.signOut(auth));
+  const signIn = () => watchAuth().then(() => fb()).then(({ A: Au, auth }) => Au.signInWithPopup(auth, new Au.GoogleAuthProvider(), Au.browserPopupRedirectResolver)).then(() => localStorage.setItem(SYNC, '1')).catch(() => {});
+  const signOut = () => fb().then(({ A: Au, auth }) => Au.signOut(auth)).then(() => localStorage.removeItem(SYNC)).catch(() => {});
   const showOn = (p) => { if (!map.current) return; map.current.panTo(p); map.current.setZoom(15); if (!desk) setSnap('peek'); else if (dsk === 'list') setDsk('split'); };
   const hasTabs = (view === 'plan' && !hits) || view === 'notes';
   const peekOrList = snap === 'peek';
@@ -426,7 +496,7 @@ export default function Page() {
   return (
     <main className="app" ref={app} data-snap={snap} data-dsk={dsk} data-tabs={hasTabs}>
       <div className="mapw">
-        {ok ? <div id="map" /> : <div className="nomap"><p>Map unavailable.<br />Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY or go online — your itinerary still works.</p></div>}
+        {ok && !mapNote ? <div id="map" /> : ok ? <div className="nomap"><div><p>{mapNote}</p>{mapBtn && <button className="btn" onClick={loadMapNow}>{mapBtn}</button>}</div></div> : <div className="nomap"><p>Map unavailable.<br />Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY or go online — your itinerary still works.</p></div>}
         {dsk === 'map' && <div className="vsw-float desk-only"><ViewSwitch /></div>}
         {ok && <div className="fabs">
           <button className="fab" aria-label="Fit route" onClick={() => fitRef.current()}><Ic n="fit" /></button>
@@ -515,6 +585,10 @@ export default function Page() {
             {!FB.apiKey ? <p className="sum">Firebase not configured — see README. Data is stored on this device only.</p> : user
               ? <div className="row"><span className="sum" style={{ margin: 0, flex: 1 }}>Synced as {user.email}</span><button className="ghost" onClick={signOut}>Sign out</button></div>
               : <button className="btn full" onClick={signIn}>Sign in with Google to sync</button>}
+            <h2 className="sec">Data and offline</h2>
+            <div className="fld"><span className="lbl">Data saver</span><Chips opts={['On', 'Off']} val={ds ? 'On' : 'Off'} on={(v) => setDsPref(v === 'On')} /></div>
+            <p className="sum">{ds ? 'The map and new route lookups wait until you ask. Your itinerary and saved routes work without data.' : 'The map loads automatically. Routes are saved on this device and reused, never recalculated.'}</p>
+            <div className="row"><button className="ghost" onClick={prepare}>Save trip routes for offline</button></div>
             <h2 className="sec">Trip</h2>
             <div className="fld"><span className="lbl">Currency</span><Chips opts={['€', '$', '£', '₪']} val={trip.cc} on={(v) => up((_, t) => { t.cc = v; })} /></div>
             <div className="row" style={{ marginTop: 14 }}>
