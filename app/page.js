@@ -5,7 +5,7 @@ const FB = { apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY, authDomain: proce
 const uid = () => Math.random().toString(36).slice(2, 9);
 const CATS = ['Sightseeing', 'Food', 'Lodging', 'Transport', 'Shopping', 'Other'];
 const MODES = { DRIVING: 'Drive', WALKING: 'Walk', TRANSIT: 'Transit' };
-const MC = { DRIVING: '#b34a26', WALKING: '#2f7a5b', TRANSIT: '#3b6fb0' };
+const MC = { DRIVING: '#e5483a', WALKING: '#12805c', TRANSIT: '#2563eb' };
 const SPD = { DRIVING: 40, WALKING: 5, TRANSIT: 22 };
 const newDay = () => ({ id: uid(), title: '', places: [], notes: '', todos: [], mode: 'WALKING', lm: {} });
 const newTrip = (name) => ({ id: uid(), name, cc: '€', notes: '', todos: [], days: [newDay()], wish: [] });
@@ -235,7 +235,7 @@ export default function Page() {
           const c = d.places.find((x) => x.id === p.id) || p, idx = d.places.findIndex((x) => x.id === p.id);
           const md = idx > 0 ? modeOf(d, d.places[idx - 1], c) : d.mode || 'WALKING';
           const meta = [c.time, c.cost > 0 ? t.cc + c.cost : ''].filter(Boolean).join(' · ');
-          info.current.setContent(`<div class="iw" dir="auto"><b>${esc(c.name)}</b>${c.sub ? `<div class="isub">${esc(c.sub)}</div>` : ''}${c.addr ? `<div class="iad">${esc(c.addr)}</div>` : ''}${meta ? `<div class="imeta">${esc(meta)}</div>` : ''}${c.note ? `<div class="inote">${esc(c.note)}</div>` : ''}<a href="${gmaps(null, c, md)}" target="_blank" rel="noopener">Navigate ➤</a></div>`);
+          info.current.setContent(`<div class="iw" dir="auto"><b>${esc(c.name)}</b>${c.sub ? `<div class="isub">${esc(c.sub)}</div>` : ''}${c.addr ? `<div class="iad">${esc(c.addr)}</div>` : ''}${meta ? `<div class="imeta">${esc(meta)}</div>` : ''}${c.note ? `<div class="inote">${esc(c.note)}</div>` : ''}<a href="${gmaps(null, c, md)}" target="_blank" rel="noopener">Navigate</a></div>`);
           info.current.open({ map: m, anchor: mkr }); openId.current = p.id;
         });
         mk.current.push(mkr); b.extend({ lat: p.lat, lng: p.lng });
