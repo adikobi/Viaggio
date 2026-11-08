@@ -1,8 +1,8 @@
-import { Fraunces, Inter, Heebo } from 'next/font/google';
+import { Bricolage_Grotesque, Heebo } from 'next/font/google';
 import './globals.css';
-// Latin display: Fraunces. Latin UI: Inter. All Hebrew (headings and body): Heebo, a variable font so every weight is available.
-const serif = Fraunces({ subsets: ['latin'], variable: '--serif', axes: ['opsz'], display: 'swap' });
-const sans = Inter({ subsets: ['latin'], variable: '--sans', display: 'swap' });
+// Two typefaces. Latin (display and UI): Bricolage Grotesque, variable weight + optical size.
+// Hebrew (headings and body): Heebo, variable, so every weight is available. Heebo also backs up any Latin glyph.
+const lat = Bricolage_Grotesque({ subsets: ['latin'], variable: '--lat', axes: ['opsz'], display: 'swap' });
 const hsans = Heebo({ subsets: ['hebrew', 'latin'], variable: '--hsans', display: 'swap' });
 export const metadata = {
   title: 'Viaggio — Trip Planner',
@@ -12,8 +12,8 @@ export const metadata = {
 };
 export const viewport = {
   width: 'device-width', initialScale: 1, viewportFit: 'cover', interactiveWidget: 'resizes-content',
-  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#f4eee4' }, { media: '(prefers-color-scheme: dark)', color: '#17110e' }],
+  themeColor: [{ media: '(prefers-color-scheme: light)', color: '#ece4d9' }, { media: '(prefers-color-scheme: dark)', color: '#15100c' }],
 };
 export default function Root({ children }) {
-  return <html lang="en" suppressHydrationWarning className={`${serif.variable} ${sans.variable} ${hsans.variable}`}><body>{children}</body></html>;
+  return <html lang="en" suppressHydrationWarning className={`${lat.variable} ${hsans.variable}`}><body>{children}</body></html>;
 }
