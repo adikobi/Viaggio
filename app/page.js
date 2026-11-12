@@ -7,11 +7,11 @@ const CATS = ['Sightseeing', 'Food', 'Lodging', 'Transport', 'Shopping', 'Other'
 const MODES = { DRIVING: 'Drive', WALKING: 'Walk', TRANSIT: 'Transit' };
 const MC = { DRIVING: '#e5483a', WALKING: '#12805c', TRANSIT: '#2563eb' };
 const SPD = { DRIVING: 40, WALKING: 5, TRANSIT: 22 };
-const newDay = () => ({ id: uid(), title: '', places: [], notes: '', todos: [], mode: 'WALKING', lm: {} });
+const newDay = () => ({ id: uid(), title: '', places: [], notes: '', todos: [], mode: 'WALKING', lm: {}, alt: [] });
 const newTrip = (name) => ({ id: uid(), name, cc: '€', notes: '', todos: [], days: [newDay()], wish: [] });
 const norm = (v) => {
   v.ts ||= 1;
-  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.days.forEach((d) => { d.title ??= ''; d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; }); });
+  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.days.forEach((d) => { d.title ??= ''; d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; d.alt ??= []; }); });
   return v;
 };
 const modeOf = (d, a, z) => d?.lm?.[a.id + '>' + z.id] || d?.mode || 'WALKING';
@@ -79,7 +79,7 @@ const P = {
   split: 'M3 5h18v14H3zM10 5v14', trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', share: 'M12 15V3M7 8l5-5 5 5M5 13v7h14v-7', pin: 'M12 22s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12zM12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5',
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14M20 20l-4-4', left: 'M15 6l-6 6 6 6', right: 'M9 6l6 6-6 6', moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
   car: 'M5 16V11l2-5h10l2 5v5M3 16h18M7.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 1 0 0 3M16.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 1 0 0 3', walk: 'M13 4.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 1 0 0 3M10 22l2-7-3-3 1-5 3 3 3 1M9 12l-3 2',
-  bus: 'M5 4h14v13H5zM5 11h14M8 20v-3M16 20v-3', dots: 'M5 12h.01M12 12h.01M19 12h.01', note: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5', retry: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
+  bus: 'M5 4h14v13H5zM5 11h14M8 20v-3M16 20v-3', dots: 'M5 12h.01M12 12h.01M19 12h.01', note: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5', retry: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7', box: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
 };
 const Ic = ({ n, s = 20 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={P[n]} /></svg>;
 const MI = { DRIVING: 'car', WALKING: 'walk', TRANSIT: 'bus' };
@@ -161,7 +161,7 @@ export default function Page() {
   const [pw, setPw] = useState(440);
   const [toast, setToast] = useState(null);
   const [dlg, setDlg] = useState(null);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(false); // false | true (route / travel list) | 'alt' (backup ideas)
   const [menu, setMenu] = useState(false);
   const desk = useMedia('(min-width:900px)');
   const [dsPref, setDsPref] = useState(null), [auto, setAuto] = useState(false), [wantMap, setWantMap] = useState(false), [mapErr, setMapErr] = useState(false), [mapTry, setMapTry] = useState(0);
@@ -214,6 +214,9 @@ export default function Page() {
   const say = (msg, act, fn) => setToast({ msg, act, fn });
   const undoable = (msg, fn) => { const prev = sRef.current; fn(); say(msg, 'Undo', () => setS({ ...prev, ts: Date.now() })); };
   const addToDay = (p) => { up((_, __, d) => { d.places.push(p); }); say(`Added to Day ${(sRef.current?.day || 0) + 1}`); };
+  const toBackup = (i) => { undoable('Moved to Backup ideas', () => up((_, __, d) => { d.alt ||= []; d.alt.push(d.places.splice(i, 1)[0]); })); setOpen(null); };
+  const toRoute = (id) => undoable('Added to the route', () => up((_, __, d) => { const k = (d.alt || []).findIndex((x) => x.id === id); if (k >= 0) d.places.push(d.alt.splice(k, 1)[0]); }));
+  const addAlt = (p) => { up((_, __, d) => { d.alt ||= []; d.alt.push(p); }); say('Added to Backup ideas'); };
   const addPlace = (p) => { if (ns === 'trip') { up((_, t) => { t.wish.push(p); }); say('Added to Travel locations'); } else addToDay(p); };
   const confirmDel = (title, text, label, msg, fn) => setDlg({ title, text, label, danger: true, ok: () => undoable(msg, fn) });
   const retryLegs = () => { miss.current.clear(); forceFor.current = retry + 1; setRetry(retry + 1); }; // an explicit tap is allowed to use data even in data saver
@@ -456,6 +459,11 @@ export default function Page() {
     </div>;
   };
 
+  const backupCard = (p) => <div className="card" key={p.id} style={{ marginBottom: 8 }}><div className="pl" style={{ alignItems: 'center' }}><div className="main" style={{ cursor: 'default' }}><b {...A(p.name)} className="bd">{p.name}</b><small {...A(p.sub || p.addr)}>{p.sub || p.addr}</small></div>
+    <a className="ib navme" href={gmaps(null, p, 'WALKING')} target="_blank" rel="noopener" aria-label="Navigate from current location" title="Navigate from current location"><Ic n="loc" s={18} /></a>
+    <button className="ghost" style={{ margin: '8px 0' }} onClick={() => toRoute(p.id)}>+ Route</button>
+    <button className="ib" onClick={() => confirmDel('Remove from Backup ideas?', p.name, 'Remove', 'Place removed', () => up((_, __, d) => { d.alt = (d.alt || []).filter((w) => w.id !== p.id); }))} aria-label="Delete"><Ic n="x" /></button></div></div>;
+
   const wishCard = (p) => <div className="card" key={p.id} style={{ marginBottom: 8 }}><div className="pl" style={{ alignItems: 'center' }}><div className="main" style={{ cursor: 'default' }}><b {...A(p.name)} className="bd">{p.name}</b><small {...A(p.addr)}>{p.addr}</small></div>
     <a className="ib navme" href={gmaps(null, p, 'WALKING')} target="_blank" rel="noopener" aria-label="Navigate from current location" title="Navigate from current location"><Ic n="loc" s={18} /></a>
     <button className="ghost" style={{ margin: '8px 0' }} onClick={() => addToDay({ ...p, id: uid() })}>+ Day {s.day + 1}</button>
@@ -482,6 +490,7 @@ export default function Page() {
           <button className="act" onClick={() => move(i, i + 1)} disabled={i === places.length - 1}><Ic n="down" />Down</button>
           <button className="act" onClick={() => showOn(p)}><Ic n="pin" />On map</button>
           <button className="act" onClick={() => { up((_, t) => { t.wish.push({ ...p, id: uid() }); }); say('Saved to Travel locations'); }}><Ic n="heart" />Save</button>
+          <button className="act" onClick={() => toBackup(i)}><Ic n="box" />Backup</button>
           <button className="act danger" onClick={() => confirmDel('Remove stop?', p.name, 'Remove', 'Stop removed', () => up((_, __, d) => { d.places.splice(i, 1); }))}><Ic n="trash" />Remove</button>
         </div>
         <label className="fld"><span className="lbl">Text under the name</span><input {...A(p.sub)} maxLength={200} value={p.sub || ''} placeholder="e.g. Book tickets ahead" onChange={(e) => patch(i, 'sub', e.target.value)} /></label>
@@ -567,6 +576,10 @@ export default function Page() {
                 {i < places.length - 1 && leg(p, places[i + 1], i)}
               </Fragment>)}</div>
               {places.length > 1 && <button className="btn full" style={{ marginTop: 18 }} onClick={share}><Ic n="share" />Share day in Google Maps</button>}
+              <h2 className="sec">Backup ideas</h2>
+              <p className="sum">Other options for Day {s.day + 1} that aren’t in the route. Move any stop here from its edit panel, or add one with “+ Route”.</p>
+              {(day.alt || []).map(backupCard)}
+              {ok && <button className="ghost" style={{ marginTop: 4 }} onClick={() => setAdding('alt')}><Ic n="plus" s={18} />Add a backup place</button>}
               <h2 className="sec">Travel locations · wish list</h2>
               {!trip.wish.length && <p className="sum">Saved places for the whole trip appear on every day. Save a stop from its edit panel.</p>}
               {trip.wish.map(wishCard)}
@@ -604,7 +617,7 @@ export default function Page() {
       {ok && <button className="addfab" aria-label={`Add a place to ${tm ? 'Travel locations' : 'Day ' + (s.day + 1)}`} onClick={() => setAdding(true)}><Ic n="plus" s={26} /></button>}
       {toast && <div className="toast" role="status" key={toast.msg}>{toast.msg}{toast.act && <button onClick={() => { toast.fn(); setToast(null); }}>{toast.act}</button>}</div>}
       {dlg && <Dialog d={dlg} close={() => setDlg(null)} />}
-      {adding && <AddDlg label={tm ? 'Travel locations' : `Day ${s.day + 1}`} onPick={addPlace} close={() => setAdding(false)} />}
+      {adding && <AddDlg label={adding === 'alt' ? `Day ${s.day + 1} backup ideas` : tm ? 'Travel locations' : `Day ${s.day + 1}`} onPick={adding === 'alt' ? addAlt : addPlace} close={() => setAdding(false)} />}
     </main>
   );
 }
