@@ -144,6 +144,7 @@ const useMedia = (q) => { const [m, setM] = useState(false); useEffect(() => { c
 
 export default function Page() {
   const [s, setS] = useState(null);
+  const [rdy, setRdy] = useState(null); // uid whose cloud copy has been read; uploads are blocked until then
   const [legs, setLegs] = useState({});
   const [retry, setRetry] = useState(0);
   const [open, setOpen] = useState(null);
@@ -191,8 +192,16 @@ export default function Page() {
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 5000); return () => clearTimeout(t); }, [toast]);
 
   useEffect(() => {
+    setRdy(null); remote.current = 0; // new/changed account: nothing is known about the cloud copy yet
     if (!user) return; let off, dead;
-    const apply = (snapd) => { const d = snapd.data(); if (d && d.ts > (sRef.current.ts || 0)) { remote.current = d.ts; setS(norm(JSON.parse(d.json))); } };
+    // Never upload before the cloud copy has been read. Otherwise a freshly signed-in device pushes its local data over the account.
+    const apply = (snapd) => {
+      if (dead) return;
+      if (!snapd.exists() && snapd.metadata.fromCache) return; // empty answer from the on-device cache says nothing about the server: keep waiting
+      const d = snapd.data(); remote.current = d?.ts || 0;
+      if (d && d.ts > (sRef.current.ts || 0)) setS(norm(JSON.parse(d.json))); // cloud is newer: it wins
+      setRdy(user.uid); // from here on, local edits newer than the cloud copy are uploaded
+    };
     fb().then(({ F, db }) => {
       if (dead) return;
       const ref = F.doc(db, 'users', user.uid);
@@ -202,10 +211,10 @@ export default function Page() {
     return () => { dead = true; off?.(); };
   }, [user, ds]);
   useEffect(() => {
-    if (!user || !s || !(s.ts > remote.current)) return;
+    if (!user || rdy !== user.uid || !s || !(s.ts > remote.current)) return;
     const t = setTimeout(() => fb().then(({ F, db }) => { remote.current = s.ts; return F.setDoc(F.doc(db, 'users', user.uid), { json: JSON.stringify(s), ts: s.ts }); }).catch(() => {}), ds ? 4000 : 800);
     return () => clearTimeout(t);
-  }, [s, user, ds]);
+  }, [s, user, ds, rdy]);
 
   const trip = s?.trips[s.cur], day = trip && (trip.days[s.day] || trip.days[0]), places = day?.places || [];
   const up = (fn) => setS((x) => { const c = structuredClone(x); const t = c.trips[c.cur]; c.day = Math.min(c.day, t.days.length - 1); fn(c, t, t.days[c.day]); c.ts = Date.now(); return c; });
