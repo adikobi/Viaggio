@@ -469,18 +469,13 @@ export default function Page() {
           <b {...A(p.name)} className="bd">{p.name}</b>
           {p.sub && <span {...A(p.sub)} className="sub bd">{p.sub}</span>}
           {p.cost > 0 && <small className="meta">{trip.cc}{p.cost}</small>}
-          <div className="tgs">{tagsOf(p).map((t) => <button key={t} className="tg" onClick={(e) => { e.stopPropagation(); setQ('#' + t); }}>#{t}</button>)}</div>
         </div>
+        <button className="ib mv" aria-label="Move up" disabled={i === 0} onClick={(e) => { e.stopPropagation(); move(i, i - 1); }}><Ic n="up" s={18} /></button>
+        <button className="ib mv" aria-label="Move down" disabled={i === places.length - 1} onClick={(e) => { e.stopPropagation(); move(i, i + 1); }}><Ic n="down" s={18} /></button>
         <a className="ib navme" href={gmaps(null, p, i > 0 ? modes[i - 1] : day.mode || 'WALKING')} target="_blank" rel="noopener" aria-label="Navigate from current location" title="Navigate from current location" onClick={(e) => e.stopPropagation()}><Ic n="loc" s={18} /></a>
         <button className="ib chev" aria-expanded={open === p.id} aria-label="Edit stop" onClick={() => setOpen(open === p.id ? null : p.id)}><Ic n="chev" /></button>
       </div>
       {open === p.id && <div className="det">
-        <label className="fld"><span className="lbl">Text under the name</span><input {...A(p.sub)} maxLength={200} value={p.sub || ''} placeholder="e.g. Book tickets ahead" onChange={(e) => patch(i, 'sub', e.target.value)} /></label>
-        <div className="fld"><span className="lbl">Time</span><Chips opts={['09:00', '12:30', '15:00', '19:30']} val={p.time} on={(v) => patch(i, 'time', p.time === v ? '' : v)} /><input type="time" value={p.time} onChange={(e) => patch(i, 'time', e.target.value)} aria-label="Time" /></div>
-        <label className="fld"><span className="lbl">Budget</span>
-          <div className="step"><i>{trip.cc}</i><input type="number" inputMode="decimal" min="0" value={p.cost} onChange={(e) => patch(i, 'cost', +e.target.value)} /><button onClick={() => patch(i, 'cost', Math.max(0, +p.cost - 10))} aria-label="Less">−</button><button onClick={() => patch(i, 'cost', +p.cost + 10)} aria-label="More">+</button></div>
-        </label>
-        <div className="fld"><span className="lbl">Category</span><Chips opts={CATS} val={p.cat} on={(v) => patch(i, 'cat', v)} /></div>
         <label className="fld"><span className="lbl">Notes · shown on the map · use #tags</span><textarea {...A(p.note)} rows="3" value={p.note} onChange={(e) => patch(i, 'note', e.target.value)} /></label>
         <div className="acts">
           <button className="act" onClick={() => move(i, i - 1)} disabled={i === 0}><Ic n="up" />Up</button>
@@ -489,6 +484,12 @@ export default function Page() {
           <button className="act" onClick={() => { up((_, t) => { t.wish.push({ ...p, id: uid() }); }); say('Saved to Travel locations'); }}><Ic n="heart" />Save</button>
           <button className="act danger" onClick={() => confirmDel('Remove stop?', p.name, 'Remove', 'Stop removed', () => up((_, __, d) => { d.places.splice(i, 1); }))}><Ic n="trash" />Remove</button>
         </div>
+        <label className="fld"><span className="lbl">Text under the name</span><input {...A(p.sub)} maxLength={200} value={p.sub || ''} placeholder="e.g. Book tickets ahead" onChange={(e) => patch(i, 'sub', e.target.value)} /></label>
+        <div className="fld"><span className="lbl">Time</span><Chips opts={['09:00', '12:30', '15:00', '19:30']} val={p.time} on={(v) => patch(i, 'time', p.time === v ? '' : v)} /><input type="time" value={p.time} onChange={(e) => patch(i, 'time', e.target.value)} aria-label="Time" /></div>
+        <label className="fld"><span className="lbl">Budget</span>
+          <div className="step"><i>{trip.cc}</i><input type="number" inputMode="decimal" min="0" value={p.cost} onChange={(e) => patch(i, 'cost', +e.target.value)} /><button onClick={() => patch(i, 'cost', Math.max(0, +p.cost - 10))} aria-label="Less">−</button><button onClick={() => patch(i, 'cost', +p.cost + 10)} aria-label="More">+</button></div>
+        </label>
+        <div className="fld"><span className="lbl">Category</span><Chips opts={CATS} val={p.cat} on={(v) => patch(i, 'cat', v)} /></div>
       </div>}
     </div>
   );
