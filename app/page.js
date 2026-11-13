@@ -173,7 +173,8 @@ export default function Page() {
   const map = useRef(), mk = useRef([]), pl = useRef([]), cache = useRef({}), miss = useRef(new Set()), info = useRef(), openId = useRef(null), sRef = useRef(), remote = useRef(0), me = useRef();
   const app = useRef(), panel = useRef(), bnd = useRef(), fitRef = useRef(), uiLoaded = useRef(false);
   const dirty = useRef(false), forceFor = useRef(-1), busy = useRef(false), authOff = useRef(null);
-  const watchAuth = () => fb().then(({ A: Au, auth }) => { authOff.current ||= Au.onAuthStateChanged(auth, setUser); });
+  // The SYNC flag is what makes the next launch restore the session, so it is set whenever Firebase reports a signed-in user (not only after the popup promise resolves, which mobile browsers often never do)
+  const watchAuth = () => fb().then(({ A: Au, auth }) => { Au.getRedirectResult(auth, Au.browserPopupRedirectResolver).catch(() => {}); authOff.current ||= Au.onAuthStateChanged(auth, (u) => { if (u) localStorage.setItem(SYNC, '1'); setUser(u); }); });
   sRef.current = s;
 
   useEffect(() => {
@@ -184,6 +185,7 @@ export default function Page() {
     setS(v?.trips ? norm(v) : { ts: 0, trips: [newTrip('Italy')], cur: 0, day: 0, theme: matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light' });
     navigator.serviceWorker?.register(`${process.env.NEXT_PUBLIC_BASE_PATH}/sw.js`).catch(() => {});
     const f = () => setOnline(navigator.onLine); f(); addEventListener('online', f); addEventListener('offline', f);
+    navigator.storage?.persist?.().catch(() => {}); // stops the browser from clearing the saved login/data when storage is low
     if (FB.apiKey && localStorage.getItem(SYNC)) watchAuth(); // Firebase is only loaded for people who signed in to sync
   }, []);
   useEffect(() => { if (view === 'more' && FB.apiKey) fb().catch(() => {}); }, [view]); // warm up so the sign-in popup isn't blocked
@@ -437,8 +439,12 @@ export default function Page() {
   }) : null;
   const backup = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(s)], { type: 'application/json' })); a.download = 'viaggio-backup.json'; a.click(); };
   const restore = async (e) => { try { const d = JSON.parse(await e.target.files[0].text()); if (Array.isArray(d.trips)) { setS(norm({ ...d, ts: Date.now() })); say('Backup restored'); } else throw 0; } catch { say('Invalid file'); } };
-  const signIn = () => watchAuth().then(() => fb()).then(({ A: Au, auth }) => Au.signInWithPopup(auth, new Au.GoogleAuthProvider(), Au.browserPopupRedirectResolver)).then(() => localStorage.setItem(SYNC, '1')).catch(() => {});
-  const signOut = () => fb().then(({ A: Au, auth }) => Au.signOut(auth)).then(() => localStorage.removeItem(SYNC)).catch(() => {});
+  const signIn = () => watchAuth().then(() => fb()).then(({ A: Au, auth }) => {
+    const prov = new Au.GoogleAuthProvider(), R = Au.browserPopupRedirectResolver;
+    // popups are unreliable on phones: fall back to a full-page redirect
+    return Au.signInWithPopup(auth, prov, R).catch((e) => /popup-blocked|operation-not-supported|web-storage-unsupported/.test(e?.code || '') ? Au.signInWithRedirect(auth, prov, R) : Promise.reject(e));
+  }).then(() => localStorage.setItem(SYNC, '1')).catch((e) => { if (!/popup-closed|cancelled/.test(e?.code || '')) say('Sign-in failed' + (e?.code ? ': ' + e.code.replace('auth/', '') : '')); });
+  const signOut = () => fb().then(({ A: Au, auth }) => Au.signOut(auth)).then(() => { localStorage.removeItem(SYNC); setUser(null); }).catch(() => {});
   const showOn = (p) => { if (!map.current) return; map.current.panTo(p); map.current.setZoom(15); if (!desk) setSnap('peek'); else if (dsk === 'list') setDsk('split'); };
   const hasTabs = (view === 'plan' && !hits) || view === 'notes';
   const peekOrList = snap === 'peek';
