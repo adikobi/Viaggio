@@ -255,3 +255,4 @@ input.dtl{font-size:40px!important}
 .pl.st .main{grid-column:1/-1;padding:14px 18px 4px}
 .pl.st .ib,.pl.st .mv{width:42px;height:42px}
 .pl.st b{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}
+.pl.st .main+.ib{grid-column:2} /* up arrow starts in the first narrow column, so all four buttons sit together at the end */
