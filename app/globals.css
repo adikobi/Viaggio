@@ -249,3 +249,9 @@ input.dtl{font-size:40px!important}
 @supports (corner-shape:squircle){.card,.stats,.empty,.todo,.dlg,.menu,.panel,.act{corner-shape:squircle}}
 
 .pl .mv{width:36px;flex:none;color:var(--ink)}.pl .mv:disabled{opacity:.3}
+
+/* stop cards: text gets the full card width, the buttons sit in their own strip underneath (always visible, no need to expand) */
+.pl.st{display:grid;grid-template-columns:minmax(0,1fr) repeat(4,auto);align-items:center;padding-inline-end:6px;padding-bottom:6px}
+.pl.st .main{grid-column:1/-1;padding:14px 18px 4px}
+.pl.st .ib,.pl.st .mv{width:42px;height:42px}
+.pl.st b{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}
