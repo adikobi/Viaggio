@@ -249,7 +249,11 @@ export default function Page() {
     try { const u = JSON.parse(localStorage.getItem(UI)); if (u) { u.snap && setSnap(u.snap); u.dsk && setDsk(u.dsk); u.pw && setPw(u.pw); typeof u.dsPref === 'boolean' && setDsPref(u.dsPref); } } catch {}
     uiLoaded.current = true; dirty.current = true; setAuto(slowNet()); // dirty: first persist migrates old route entries to the compact format
     setS(v?.trips ? norm(v) : { ts: 0, trips: [newTrip('Italy')], cur: 0, day: 0, theme: matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light' });
-    navigator.serviceWorker?.register(`${process.env.NEXT_PUBLIC_BASE_PATH}/sw.js`).catch(() => {});
+    if ('serviceWorker' in navigator) { // always re-check sw.js, and reload once when a new version takes over so a normal (non-incognito) load never stays on the old build
+      const had = !!navigator.serviceWorker.controller; let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !reloaded) { reloaded = true; location.reload(); } });
+      navigator.serviceWorker.register(`${process.env.NEXT_PUBLIC_BASE_PATH}/sw.js`, { updateViaCache: 'none' }).then((r) => { r.update().catch(() => {}); document.addEventListener('visibilitychange', () => { if (!document.hidden) r.update().catch(() => {}); }); }).catch(() => {});
+    }
     const f = () => setOnline(navigator.onLine); f(); addEventListener('online', f); addEventListener('offline', f);
     navigator.storage?.persist?.().catch(() => {}); // stops the browser from clearing the saved login/data when storage is low
     if (FB.apiKey && localStorage.getItem(SYNC)) watchAuth(); // Firebase is only loaded for people who signed in to sync
@@ -552,7 +556,7 @@ export default function Page() {
 
   const stop = (p, i) => (
     <div className={'card' + (drag === i ? ' drag' : '')} draggable={desk && open !== p.id} onDragStart={() => setDrag(i)} onDragEnd={() => setDrag(null)} onDragOver={(e) => e.preventDefault()} onDrop={() => drag !== null && move(drag, i)}>
-      <div className="pl">
+      <div className="pl st">
         <div className="main" onClick={() => setOpen(open === p.id ? null : p.id)}>
           {p.time && <span className="tm">{p.time}</span>}
           <b {...A(p.name)} className="bd">{p.name}</b>
