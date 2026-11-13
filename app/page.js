@@ -84,25 +84,91 @@ const P = {
 const Ic = ({ n, s = 20 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={P[n]} /></svg>;
 const MI = { DRIVING: 'car', WALKING: 'walk', TRANSIT: 'bus' };
 
+/* ---- Place search: Google (debounced, cached, session-tokened) with automatic Photon fallback ---- */
+const FBK = 'viaggio.geo.fallback', QC_MAX = 60;
+let useFb = false; try { useFb = sessionStorage.getItem(FBK) === '1'; } catch {}
+const goFb = () => { useFb = true; try { sessionStorage.setItem(FBK, '1'); } catch {} };
+const qCache = new Map(); // "g|query" or "p|query" -> suggestions, avoids repeat requests
+const remember = (k, v) => { if (qCache.size >= QC_MAX) qCache.delete(qCache.keys().next().value); qCache.set(k, v); };
+const newPlace = (o) => ({ id: uid(), name: '', addr: '', lat: 0, lng: 0, pid: '', cat: 'Sightseeing', time: '', sub: '', cost: 0, note: '', ...o });
+const quotaErr = (e) => /quota|429|RESOURCE_EXHAUSTED|network|failed to fetch|PERMISSION_DENIED|OVER_QUERY/i.test(String(e?.message || e));
+/* Photon GeoJSON feature -> same shape as a Google-picked place */
+const fromPhoton = (f) => {
+  const p = f.properties || {}, [lng, lat] = f.geometry.coordinates;
+  const street = [p.street, p.housenumber].filter(Boolean).join(' ');
+  const addr = [...new Set([street, p.district, p.city || p.town || p.village || p.county, p.state, p.country].filter(Boolean))].join(', ');
+  const name = p.name || street || addr;
+  return { key: (p.osm_type || '') + (p.osm_id || '') + ',' + lat + ',' + lng, label: name, sub: addr === name ? '' : addr, place: newPlace({ name, addr: addr || name, lat, lng, pid: p.osm_id ? `osm:${p.osm_type || ''}${p.osm_id}` : '' }) };
+};
+async function photon(q, signal) {
+  const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=5`, { signal });
+  if (!r.ok) throw new Error('photon ' + r.status);
+  return ((await r.json()).features || []).map(fromPhoton);
+}
+async function gSearch(q, token) {
+  const { AutocompleteSuggestion } = await google.maps.importLibrary('places');
+  const { suggestions } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({ input: q, sessionToken: token });
+  return suggestions.filter((s) => s.placePrediction).slice(0, 5).map((s) => {
+    const pp = s.placePrediction;
+    return { key: pp.placeId, label: pp.mainText?.text || pp.text.text, sub: pp.secondaryText?.text || '', pred: pp };
+  });
+}
+
 function Search({ onPick, focus }) {
-  const box = useRef(), cb = useRef(); cb.current = onPick;
-  useEffect(() => {
-    let dead;
-    loadMaps().then(async () => {
-      const { PlaceAutocompleteElement } = await google.maps.importLibrary('places');
-      if (dead) return;
-      const el = new PlaceAutocompleteElement();
-      el.addEventListener('gmp-select', async ({ placePrediction }) => {
-        const p = placePrediction.toPlace();
-        await p.fetchFields({ fields: ['displayName', 'formattedAddress', 'location', 'id'] });
-        cb.current({ id: uid(), name: p.displayName, addr: p.formattedAddress, lat: p.location.lat(), lng: p.location.lng(), pid: p.id, cat: 'Sightseeing', time: '', sub: '', cost: 0, note: '' });
-      });
-      box.current.replaceChildren(el);
-      if (focus) setTimeout(() => { try { el.focus(); } catch {} }, 60);
-    }).catch(() => {});
-    return () => { dead = true; };
-  }, []);
-  return <div ref={box} className="srch" />;
+  const [q, setQ] = useState(''), [items, setItems] = useState([]), [open, setOpen] = useState(false), [hi, setHi] = useState(-1), [src, setSrc] = useState(useFb ? 'p' : 'g');
+  const cb = useRef(), tok = useRef(), seq = useRef(0), ac = useRef(), inp = useRef(); cb.current = onPick;
+  const lib = useRef();
+  useEffect(() => { if (focus) setTimeout(() => inp.current?.focus(), 60); return () => ac.current?.abort(); }, []);
+  const run = async (text) => {
+    const n = ++seq.current; ac.current?.abort(); ac.current = new AbortController();
+    const done = (list, s) => { if (n === seq.current) { setItems(list); setSrc(s); setHi(-1); setOpen(true); } };
+    if (!useFb) {
+      const ck = 'g|' + text.toLowerCase(); if (qCache.has(ck)) return done(qCache.get(ck), 'g');
+      try {
+        await loadMaps();
+        const { AutocompleteSessionToken } = lib.current ||= await google.maps.importLibrary('places');
+        tok.current ||= new AutocompleteSessionToken();
+        const list = await gSearch(text, tok.current); remember(ck, list); return done(list, 'g');
+      } catch (e) { if (!quotaErr(e)) return done([], 'g'); goFb(); }
+    }
+    const ck = 'p|' + text.toLowerCase(); if (qCache.has(ck)) return done(qCache.get(ck), 'p');
+    try { const list = await photon(text, ac.current.signal); remember(ck, list); done(list, 'p'); } catch (e) { if (e?.name !== 'AbortError') done([], 'p'); }
+  };
+  const t = useRef();
+  const change = (v) => {
+    setQ(v); clearTimeout(t.current);
+    const s = v.trim(); if (s.length < 3) { seq.current++; setItems([]); setOpen(false); return; }
+    t.current = setTimeout(() => run(s), 450); // wait for the user to pause typing
+  };
+  const pick = async (it) => {
+    setOpen(false); setQ(''); setItems([]);
+    if (it.place) return cb.current(it.place);
+    try {
+      const p = it.pred.toPlace(); // inherits the session token -> autocomplete + details billed as one session
+      await p.fetchFields({ fields: ['displayName', 'formattedAddress', 'location', 'id'] });
+      tok.current = null;
+      cb.current(newPlace({ name: p.displayName, addr: p.formattedAddress, lat: p.location.lat(), lng: p.location.lng(), pid: p.id }));
+    } catch { tok.current = null; }
+  };
+  const key = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(h + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+    else if (e.key === 'Enter' && items.length) { e.preventDefault(); pick(items[Math.max(hi, 0)]); }
+    else if (e.key === 'Escape') setOpen(false);
+  };
+  return <div className="srch" style={{ position: 'relative' }}>
+    <input ref={inp} {...A(q)} value={q} placeholder="Search a place…" enterKeyHint="search" autoComplete="off" role="combobox" aria-expanded={open} aria-autocomplete="list"
+      onChange={(e) => change(e.target.value)} onKeyDown={key} onFocus={() => items.length && setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+      style={{ width: '100%', boxSizing: 'border-box' }} />
+    {open && <div role="listbox" style={{ position: 'absolute', left: 0, right: 0, top: '100%', zIndex: 50, marginTop: 4, background: 'Canvas', color: 'CanvasText', border: '1px solid rgba(128,128,128,.35)', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.2)', overflow: 'hidden' }}>
+      {items.map((it, i) => <div key={it.key} role="option" aria-selected={i === hi} onMouseDown={(e) => { e.preventDefault(); pick(it); }} onMouseEnter={() => setHi(i)}
+        style={{ padding: '10px 12px', cursor: 'pointer', background: i === hi ? 'rgba(128,128,128,.18)' : 'transparent' }}>
+        <div {...A(it.label)} style={{ fontWeight: 600 }}>{it.label}</div>{it.sub && <small {...A(it.sub)} style={{ opacity: .7 }}>{it.sub}</small>}
+      </div>)}
+      {!items.length && <div style={{ padding: '10px 12px', opacity: .7 }}>No results</div>}
+      <small style={{ display: 'block', padding: '4px 12px 6px', opacity: .5, textAlign: 'right' }}>{src === 'g' ? 'Google' : 'OpenStreetMap · Photon'}</small>
+    </div>}
+  </div>;
 }
 
 const Chips = ({ opts, val, on, f = (x) => x }) => <div className="chips">{opts.map((o) => <button key={o} className="chip" aria-pressed={val === o} onClick={() => on(o)}>{f(o)}</button>)}</div>;
