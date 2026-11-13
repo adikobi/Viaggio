@@ -227,6 +227,7 @@ export default function Page() {
   const [dsk, setDsk] = useState('split');
   const [pw, setPw] = useState(440);
   const [toast, setToast] = useState(null);
+  const [upd, setUpd] = useState(false); const updSkip = useRef(false); // a newer version of the app is ready
   const [dlg, setDlg] = useState(null);
   const [adding, setAdding] = useState(false); // false | true (route / travel list) | 'alt' (backup ideas)
   const [menu, setMenu] = useState(false);
@@ -249,14 +250,21 @@ export default function Page() {
     try { const u = JSON.parse(localStorage.getItem(UI)); if (u) { u.snap && setSnap(u.snap); u.dsk && setDsk(u.dsk); u.pw && setPw(u.pw); typeof u.dsPref === 'boolean' && setDsPref(u.dsPref); } } catch {}
     uiLoaded.current = true; dirty.current = true; setAuto(slowNet()); // dirty: first persist migrates old route entries to the compact format
     setS(v?.trips ? norm(v) : { ts: 0, trips: [newTrip('Italy')], cur: 0, day: 0, theme: matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light' });
-    if ('serviceWorker' in navigator) { // always re-check sw.js, and reload once when a new version takes over so a normal (non-incognito) load never stays on the old build
-      const had = !!navigator.serviceWorker.controller; let reloaded = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !reloaded) { reloaded = true; location.reload(); } });
-      navigator.serviceWorker.register(`${process.env.NEXT_PUBLIC_BASE_PATH}/sw.js`, { updateViaCache: 'none' }).then((r) => { r.update().catch(() => {}); document.addEventListener('visibilitychange', () => { if (!document.hidden) r.update().catch(() => {}); }); }).catch(() => {});
+    let swOff = () => {};
+    if ('serviceWorker' in navigator) { // new versions: the worker (sw.js) detects a newer deploy and we offer a Reload button instead of reloading under the user's hands
+      const sw = navigator.serviceWorker, had = !!sw.controller, ask = () => sw.controller?.postMessage({ type: 'CHECK' });
+      const offer = () => { if (!updSkip.current) setUpd(true); };
+      const onMsg = (ev) => { if (ev.data?.type === 'UPDATE') offer(); }, onCtl = () => { if (had) offer(); };
+      const onVis = () => { if (!document.hidden) { sw.getRegistration().then((r) => r?.update()).catch(() => {}); ask(); } };
+      sw.addEventListener('message', onMsg); sw.addEventListener('controllerchange', onCtl); document.addEventListener('visibilitychange', onVis);
+      sw.register(`${process.env.NEXT_PUBLIC_BASE_PATH}/sw.js`, { updateViaCache: 'none' }).then((r) => r.update().catch(() => {})).catch(() => {});
+      const t1 = setTimeout(ask, 4000), t2 = setInterval(ask, 30 * 60 * 1000);
+      swOff = () => { sw.removeEventListener('message', onMsg); sw.removeEventListener('controllerchange', onCtl); document.removeEventListener('visibilitychange', onVis); clearTimeout(t1); clearInterval(t2); };
     }
     const f = () => setOnline(navigator.onLine); f(); addEventListener('online', f); addEventListener('offline', f);
     navigator.storage?.persist?.().catch(() => {}); // stops the browser from clearing the saved login/data when storage is low
     if (FB.apiKey && localStorage.getItem(SYNC)) watchAuth(); // Firebase is only loaded for people who signed in to sync
+    return () => swOff();
   }, []);
   useEffect(() => { if (view === 'more' && FB.apiKey) fb().catch(() => {}); }, [view]); // warm up so the sign-in popup isn't blocked
   useEffect(() => { if (s) { localStorage.setItem(KEY, JSON.stringify(s)); document.documentElement.dataset.theme = s.theme; } }, [s]);
@@ -701,6 +709,7 @@ export default function Page() {
       </section>
       {ok && <button className="addfab" aria-label={`Add a place to ${tm ? 'Travel locations' : 'Day ' + (s.day + 1)}`} onClick={() => setAdding(true)}><Ic n="plus" s={26} /></button>}
       {toast && <div className="toast" role="status" key={toast.msg}>{toast.msg}{toast.act && <button onClick={() => { toast.fn(); setToast(null); }}>{toast.act}</button>}</div>}
+      {upd && <div className="toast" role="status" style={{ top: 'calc(var(--top) + 68px)' }}>New version available<button onClick={() => location.reload()}>Reload</button><button aria-label="Later" style={{ background: 'none', color: 'inherit', padding: 0, width: 36 }} onClick={() => { updSkip.current = true; setUpd(false); }}><Ic n="x" s={16} /></button></div>}
       {dlg && <Dialog d={dlg} close={() => setDlg(null)} />}
       {adding && <AddDlg label={adding === 'alt' ? `Day ${s.day + 1} backup ideas` : tm ? 'Travel locations' : `Day ${s.day + 1}`} onPick={adding === 'alt' ? addAlt : addPlace} close={() => setAdding(false)} />}
     </main>
