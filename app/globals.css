@@ -269,13 +269,21 @@ input.dtl{font-size:40px!important}
 .tile .plus{width:52px;height:52px;border-radius:50%;background:var(--acc);color:var(--on);display:grid;place-items:center}
 .tile:active{transform:scale(.97);transition-duration:.08s}
 @media(hover:hover) and (pointer:fine){.tile:not(.new):hover{background:color-mix(in srgb,var(--card),var(--ink) 4%)}.tile.new:hover{background:var(--fill2)}.tile.new:hover .plus{background:var(--acc2)}}
-.stats.two{grid-template-columns:repeat(2,1fr)}
-.ent{display:flex;align-items:center;gap:2px;min-height:56px;background:var(--card);border-radius:18px;margin-bottom:6px;padding-inline-end:4px;animation:in .3s var(--ease)}
-.ent input{background:none;border-radius:14px;min-width:0}
-.ent input:first-child{flex:1}
-.ent input:focus{background:var(--fill)}
-.amt{flex:none;width:104px;text-align:end;font-variant-numeric:tabular-nums;font-weight:700}
-.addrow input:first-child{flex:1;min-width:0}
-@supports (corner-shape:squircle){.tile,.ent{corner-shape:squircle}}
-@media(prefers-contrast:more){.tile,.ent{box-shadow:inset 0 0 0 2px var(--line2)}}
-@media(prefers-reduced-motion:reduce){.tile,.ent{animation:fade .15s!important}}
+@supports (corner-shape:squircle){.tile,.memo{corner-shape:squircle}}
+@media(prefers-contrast:more){.tile,.memo{box-shadow:inset 0 0 0 2px var(--line2)}}
+@media(prefers-reduced-motion:reduce){.tile,.memo{animation:fade .15s!important}}
+
+/* ---------- notes inside a section: read in full, edit on demand ---------- */
+.memo{background:var(--card);border-radius:24px;padding:12px 18px 18px;margin-top:10px;display:grid;gap:10px;min-width:0;animation:in .3s var(--ease)}
+.memo .mh{display:flex;align-items:flex-start;gap:6px;margin-inline-end:-10px}
+.memo .mh b{flex:1;min-width:0;padding-top:10px;font:700 21px/1.25 var(--lat),var(--hsans),sans-serif;letter-spacing:-.03em;overflow-wrap:anywhere}
+.memo b:lang(he){font-family:var(--hsans),system-ui,sans-serif;line-height:1.35}
+.memo .mx{font-size:16px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.memo .mx.cl{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;overflow:hidden}
+.memo .mx a{color:var(--acc-t);font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.memo .more{justify-self:start;min-height:40px;padding:0 18px;border-radius:99px;background:var(--fill);font-size:14px;font-weight:600}
+.memo.ed{padding-top:16px}
+.memo .mt{font-size:20px!important;font-weight:700;letter-spacing:-.03em}
+.memo textarea{resize:none;overflow:hidden;min-height:150px;line-height:1.65}
+.memo.ed .row{justify-content:space-between;margin-top:4px}
+@media(hover:hover) and (pointer:fine){.memo .more:hover{background:var(--fill2)}}
