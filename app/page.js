@@ -11,7 +11,7 @@ const newDay = () => ({ id: uid(), title: '', places: [], notes: '', todos: [], 
 const newTrip = (name) => ({ id: uid(), name, cc: '€', notes: '', todos: [], days: [newDay()], wish: [], secs: [] });
 const norm = (v) => {
   v.ts ||= 1;
-  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.secs ??= []; t.secs.forEach((o) => { o.name ??= ''; o.notes ??= ''; o.items ??= []; }); t.days.forEach((d) => { d.title ??= ''; d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; d.alt ??= []; }); });
+  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.secs ??= []; t.secs.forEach((o) => { o.name ??= ''; o.items ??= []; o.items.forEach((i) => { if (i.title === undefined) { i.title = i.text || ''; i.text = i.cost ? 'Cost: ' + i.cost : ''; delete i.cost; } }); if (o.notes) o.items.push({ id: uid(), title: 'Notes', text: o.notes }); delete o.notes; }); t.days.forEach((d) => { d.title ??= ''; d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; d.alt ??= []; }); });
   return v;
 };
 const modeOf = (d, a, z) => d?.lm?.[a.id + '>' + z.id] || d?.mode || 'WALKING';
@@ -23,7 +23,6 @@ const A = (t) => ({ dir: 'auto', lang: /[\u0590-\u05FF]/.test(t || '') ? 'he' : 
 const tagsOf = (p) => [...new Set([p.cat.toLowerCase(), ...((p.note || '').match(/#[\p{L}\p{N}_]+/gu) || []).map((t) => t.slice(1).toLowerCase())])];
 const gmaps = (o, d, m) => `https://www.google.com/maps/dir/?api=1${o ? '&origin=' + ll(o) : ''}&destination=${ll(d)}&travelmode=${m.toLowerCase()}`;
 const TTL = 30 * 864e5; // cached leg times stay valid 30 days
-const num = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0; // costs are typed freely: 12,5 and 12.5 both work
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* Google polyline encoding (5 decimals): a cached route is ~6x smaller than a [{lat,lng}] array, so far more routes fit in localStorage */
 const encPoly = (pts) => { let o = '', pl = 0, pn = 0; const e = (v) => { v = v < 0 ? ~(v << 1) : v << 1; while (v >= 32) { o += String.fromCharCode((32 | (v & 31)) + 63); v >>= 5; } o += String.fromCharCode(v + 63); }; for (const p of pts) { const a = Math.round(p.lat * 1e5), n = Math.round(p.lng * 1e5); e(a - pl); e(n - pn); pl = a; pn = n; } return o; };
@@ -80,7 +79,7 @@ const P = {
   split: 'M3 5h18v14H3zM10 5v14', trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', share: 'M12 15V3M7 8l5-5 5 5M5 13v7h14v-7', pin: 'M12 22s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12zM12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5',
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14M20 20l-4-4', left: 'M15 6l-6 6 6 6', right: 'M9 6l6 6-6 6', moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
   car: 'M5 16V11l2-5h10l2 5v5M3 16h18M7.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 1 0 0 3M16.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 1 0 0 3', walk: 'M13 4.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 1 0 0 3M10 22l2-7-3-3 1-5 3 3 3 1M9 12l-3 2',
-  bus: 'M5 4h14v13H5zM5 11h14M8 20v-3M16 20v-3', dots: 'M5 12h.01M12 12h.01M19 12h.01', note: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5', retry: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7', box: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
+  bus: 'M5 4h14v13H5zM5 11h14M8 20v-3M16 20v-3', dots: 'M5 12h.01M12 12h.01M19 12h.01', note: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5', retry: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7', box: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4', edit: 'M4 20h4L19 9l-4-4L4 16zM13 7l4 4',
 };
 const Ic = ({ n, s = 20 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={P[n]} /></svg>;
 const MI = { DRIVING: 'car', WALKING: 'walk', TRANSIT: 'bus' };
@@ -187,19 +186,37 @@ function Todos({ items, set, del }) {
   </>;
 }
 
-/* one travel section's entries: a title and a cost per line, editable in place */
-function SecEntries({ items, set, del, cc }) {
-  const [t, setT] = useState(''), [c, setC] = useState('');
-  const add = () => { const x = t.trim(); if (!x) return; set((l) => [...l, { id: uid(), text: x, cost: c.trim() }]); setT(''); setC(''); };
-  const edit = (id, k, v) => set((l) => l.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
-  const onKey = (e) => e.key === 'Enter' && add();
+/* URLs inside a note become tappable links */
+const Linked = ({ t }) => t.split(/(https?:\/\/[^\s<]*[^\s<.,;:!?)\]'"])/g).map((s, i) => (i % 2 ? <a key={i} href={s} target="_blank" rel="noopener noreferrer">{s}</a> : s));
+
+/* a note: read mode shows everything (long ones fold to six lines with "Show all"); Edit turns it into a title + a growing text box */
+function Memo({ m, set, del, edit0 }) {
+  const [ed, setEd] = useState(edit0), [all, setAll] = useState(false), ta = useRef();
+  const patch = (k, v) => set((l) => l.map((x) => (x.id === m.id ? { ...x, [k]: v } : x)));
+  useEffect(() => { const e = ta.current; if (ed && e) { e.style.height = 'auto'; e.style.height = e.scrollHeight + 'px'; } }, [ed, m.text]);
+  const long = m.text.length > 260 || m.text.split('\n').length > 6;
+  if (ed) return <div className="memo ed">
+    <input className="mt" autoFocus={edit0} {...A(m.title)} value={m.title} maxLength={120} placeholder="Title" aria-label="Note title" enterKeyHint="next" onChange={(e) => patch('title', e.target.value)} />
+    <textarea ref={ta} {...A(m.text)} rows={5} value={m.text} placeholder="Write everything you want to remember…" aria-label="Note text" onChange={(e) => patch('text', e.target.value)} />
+    <div className="row"><button className="ghost danger" onClick={() => del(m)}><Ic n="trash" />Delete</button><button className="btn" onClick={() => (m.title.trim() || m.text.trim() ? setEd(false) : del(m, true))}>Done</button></div>
+  </div>;
+  return <div className="memo">
+    <div className="mh"><b {...A(m.title)} className="bd">{m.title || 'Untitled'}</b><button className="ib" onClick={() => setEd(true)} aria-label="Edit note"><Ic n="edit" /></button></div>
+    {m.text && <p {...A(m.text)} className={'mx bd' + (long && !all ? ' cl' : '')}><Linked t={m.text} /></p>}
+    {long && <button className="more" aria-expanded={all} onClick={() => setAll(!all)}>{all ? 'Show less' : 'Show all'}</button>}
+  </div>;
+}
+
+function Memos({ items, set, del }) {
+  const [fresh, setFresh] = useState(null), [q, setQ] = useState('');
+  const add = () => { const id = uid(); set((l) => [{ id, title: '', text: '' }, ...l]); setFresh(id); setQ(''); };
+  const f = q.trim().toLowerCase(), shown = f ? items.filter((m) => (m.title + '\n' + m.text).toLowerCase().includes(f)) : items;
   return <>
-    <div className="addrow"><input {...A(t)} value={t} onChange={(e) => setT(e.target.value)} placeholder="Add an entry" enterKeyHint="next" onKeyDown={onKey} /><input className="amt" inputMode="decimal" value={c} onChange={(e) => setC(e.target.value)} placeholder={cc} aria-label="Cost" enterKeyHint="done" onKeyDown={onKey} /><button className="ib acc" onClick={add} aria-label="Add entry"><Ic n="plus" /></button></div>
-    {items.map((i) => <div key={i.id} className="ent">
-      <input {...A(i.text)} value={i.text} aria-label="Entry" onChange={(e) => edit(i.id, 'text', e.target.value)} />
-      <input className="amt" inputMode="decimal" value={i.cost} placeholder="—" aria-label="Cost" onChange={(e) => edit(i.id, 'cost', e.target.value)} />
-      <button className="ib" onClick={() => del(i)} aria-label="Delete entry"><Ic n="x" /></button>
-    </div>)}
+    <button className="btn full" onClick={add}><Ic n="plus" />Add a note</button>
+    {items.length > 4 && <div className="find" style={{ marginTop: 12, marginBottom: 0 }}><Ic n="search" /><input {...A(q)} placeholder="Search these notes…" value={q} onChange={(e) => setQ(e.target.value)} enterKeyHint="search" /></div>}
+    {shown.map((m) => <Memo key={m.id} m={m} set={set} del={del} edit0={fresh === m.id} />)}
+    {!items.length && <p className="sum" style={{ marginTop: 14 }}>Nothing here yet. Add a note and write down anything you want to keep.</p>}
+    {!!items.length && !shown.length && <p className="sum" style={{ marginTop: 14 }}>No matches.</p>}
   </>;
 }
 
@@ -550,12 +567,10 @@ export default function Page() {
   const delTask = (t) => confirmDel('Delete task?', t.text, 'Delete', 'Task deleted', () => upN((o) => { o.todos = o.todos.filter((x) => x.id !== t.id); }));
   const openSec = tm ? trip.secs.find((x) => x.id === sec) : null;
   const upS = (fn) => up((_, t) => { const o = t.secs.find((x) => x.id === sec); if (o) fn(o); });
-  const secSum = (o) => o.items.reduce((a, i) => a + num(i.cost), 0);
-  const money = (n) => trip.cc + (Math.round(n * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
   const goSec = (id) => { setSec(id); panel.current?.querySelector('.body')?.scrollTo(0, 0); };
-  const newSec = () => setDlg({ title: 'New section', input: '', ph: 'Section name', label: 'Create', ok: (n) => { const id = uid(); up((_, t) => { t.secs.push({ id, name: n, notes: '', items: [] }); }); goSec(id); } });
-  const delSec = () => confirmDel(`Delete “${openSec.name || 'Untitled'}”?`, 'This removes its entries and notes.', 'Delete', 'Section deleted', () => { const id = openSec.id; up((_, t) => { t.secs = t.secs.filter((x) => x.id !== id); }); setSec(null); });
-  const delEnt = (i) => undoable('Entry deleted', () => upS((o) => { o.items = o.items.filter((x) => x.id !== i.id); }));
+  const newSec = () => setDlg({ title: 'New section', input: '', ph: 'Section name', label: 'Create', ok: (n) => { const id = uid(); up((_, t) => { t.secs.push({ id, name: n, items: [] }); }); goSec(id); } });
+  const delSec = () => confirmDel(`Delete “${openSec.name || 'Untitled'}”?`, 'This removes all the notes inside it.', 'Delete', 'Section deleted', () => { const id = openSec.id; up((_, t) => { t.secs = t.secs.filter((x) => x.id !== id); }); setSec(null); });
+  const delMemo = (m, quiet) => { const go = () => upS((o) => { o.items = o.items.filter((x) => x.id !== m.id); }); if (quiet) go(); else undoable('Note deleted', go); };
   const moveDay = (dir) => up((c, t) => { const i = c.day, j = i + dir; if (j >= 0 && j < t.days.length) { t.days.splice(j, 0, t.days.splice(i, 1)[0]); c.day = j; } });
   const removeDay = () => {
     if (trip.days.length < 2) return say('A trip needs at least one day');
@@ -664,19 +679,16 @@ export default function Page() {
             </> : <>
               {tm ? openSec ? <>
                 <button className="ghost" onClick={() => goSec(null)}><Ic n="left" s={18} />All sections</button>
-                <div className="stats two" style={{ marginTop: 14 }}><div className="stat"><b>{openSec.items.length}</b><small>{openSec.items.length === 1 ? 'entry' : 'entries'}</small></div><div className="stat"><b>{money(secSum(openSec))}</b><small>total cost</small></div></div>
-                <h2 className="sec" style={{ marginTop: 6 }}>Entries</h2>
-                <SecEntries items={openSec.items} set={(fn) => upS((o) => { o.items = fn(o.items); })} del={delEnt} cc={trip.cc} />
-                <h2 className="sec">Notes</h2>
-                <textarea key={openSec.id} {...A(openSec.notes)} rows="6" placeholder="Details, booking numbers, links…" value={openSec.notes} onChange={(e) => upS((o) => { o.notes = e.target.value; })} />
-                <div className="row" style={{ marginTop: 22 }}><button className="ghost danger" onClick={delSec}><Ic n="trash" />Delete section</button></div>
+                <div style={{ height: 14 }} />
+                <Memos items={openSec.items} set={(fn) => upS((o) => { o.items = fn(o.items); })} del={delMemo} />
+                <div className="row" style={{ marginTop: 32 }}><button className="ghost danger" onClick={delSec}><Ic n="trash" />Delete section</button></div>
               </> : <>
                 <h2 className="sec" style={{ marginTop: 6 }}>Sections</h2>
-                {!trip.secs.length && <p className="sum" style={{ marginTop: 0 }}>Group anything for the whole trip into its own square, with its own entries, costs and notes.</p>}
+                {!trip.secs.length && <p className="sum" style={{ marginTop: 0 }}>Keep what you want to remember in squares of your own: each opens into its own notes.</p>}
                 <div className="tiles">
-                  {trip.secs.map((o) => { const n = o.items.length, t = secSum(o); return <button key={o.id} className="tile" onClick={() => goSec(o.id)}>
+                  {trip.secs.map((o) => { const n = o.items.length; return <button key={o.id} className="tile" onClick={() => goSec(o.id)}>
                     <b {...A(o.name)}>{o.name || 'Untitled'}</b>
-                    <span className="tv"><i>{t ? money(t) : '—'}</i><small>{n ? `${n} ${n === 1 ? 'entry' : 'entries'}` : 'Empty'}</small></span>
+                    <span className="tv"><i>{n || '—'}</i><small>{n ? (n === 1 ? 'note' : 'notes') : 'Empty'}</small></span>
                   </button>; })}
                   <button className="tile new" onClick={newSec}><span className="plus"><Ic n="plus" s={24} /></span>New section</button>
                 </div>
