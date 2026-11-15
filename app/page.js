@@ -8,10 +8,10 @@ const MODES = { DRIVING: 'Drive', WALKING: 'Walk', TRANSIT: 'Transit' };
 const MC = { DRIVING: '#e5483a', WALKING: '#12805c', TRANSIT: '#2563eb' };
 const SPD = { DRIVING: 40, WALKING: 5, TRANSIT: 22 };
 const newDay = () => ({ id: uid(), title: '', places: [], notes: '', todos: [], mode: 'WALKING', lm: {}, alt: [] });
-const newTrip = (name) => ({ id: uid(), name, cc: '€', notes: '', todos: [], days: [newDay()], wish: [] });
+const newTrip = (name) => ({ id: uid(), name, cc: '€', notes: '', todos: [], days: [newDay()], wish: [], secs: [] });
 const norm = (v) => {
   v.ts ||= 1;
-  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.days.forEach((d) => { d.title ??= ''; d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; d.alt ??= []; }); });
+  v.trips.forEach((t) => { t.notes ??= ''; t.todos ??= []; t.cc ??= '€'; t.wish ??= []; t.secs ??= []; t.secs.forEach((o) => { o.name ??= ''; o.notes ??= ''; o.items ??= []; }); t.days.forEach((d) => { d.title ??= ''; d.notes ??= ''; d.todos ??= []; d.mode ??= 'WALKING'; d.lm ??= {}; d.alt ??= []; }); });
   return v;
 };
 const modeOf = (d, a, z) => d?.lm?.[a.id + '>' + z.id] || d?.mode || 'WALKING';
@@ -23,6 +23,7 @@ const A = (t) => ({ dir: 'auto', lang: /[\u0590-\u05FF]/.test(t || '') ? 'he' : 
 const tagsOf = (p) => [...new Set([p.cat.toLowerCase(), ...((p.note || '').match(/#[\p{L}\p{N}_]+/gu) || []).map((t) => t.slice(1).toLowerCase())])];
 const gmaps = (o, d, m) => `https://www.google.com/maps/dir/?api=1${o ? '&origin=' + ll(o) : ''}&destination=${ll(d)}&travelmode=${m.toLowerCase()}`;
 const TTL = 30 * 864e5; // cached leg times stay valid 30 days
+const num = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0; // costs are typed freely: 12,5 and 12.5 both work
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* Google polyline encoding (5 decimals): a cached route is ~6x smaller than a [{lat,lng}] array, so far more routes fit in localStorage */
 const encPoly = (pts) => { let o = '', pl = 0, pn = 0; const e = (v) => { v = v < 0 ? ~(v << 1) : v << 1; while (v >= 32) { o += String.fromCharCode((32 | (v & 31)) + 63); v >>= 5; } o += String.fromCharCode(v + 63); }; for (const p of pts) { const a = Math.round(p.lat * 1e5), n = Math.round(p.lng * 1e5); e(a - pl); e(n - pn); pl = a; pn = n; } return o; };
@@ -186,6 +187,22 @@ function Todos({ items, set, del }) {
   </>;
 }
 
+/* one travel section's entries: a title and a cost per line, editable in place */
+function SecEntries({ items, set, del, cc }) {
+  const [t, setT] = useState(''), [c, setC] = useState('');
+  const add = () => { const x = t.trim(); if (!x) return; set((l) => [...l, { id: uid(), text: x, cost: c.trim() }]); setT(''); setC(''); };
+  const edit = (id, k, v) => set((l) => l.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
+  const onKey = (e) => e.key === 'Enter' && add();
+  return <>
+    <div className="addrow"><input {...A(t)} value={t} onChange={(e) => setT(e.target.value)} placeholder="Add an entry" enterKeyHint="next" onKeyDown={onKey} /><input className="amt" inputMode="decimal" value={c} onChange={(e) => setC(e.target.value)} placeholder={cc} aria-label="Cost" enterKeyHint="done" onKeyDown={onKey} /><button className="ib acc" onClick={add} aria-label="Add entry"><Ic n="plus" /></button></div>
+    {items.map((i) => <div key={i.id} className="ent">
+      <input {...A(i.text)} value={i.text} aria-label="Entry" onChange={(e) => edit(i.id, 'text', e.target.value)} />
+      <input className="amt" inputMode="decimal" value={i.cost} placeholder="—" aria-label="Cost" onChange={(e) => edit(i.id, 'cost', e.target.value)} />
+      <button className="ib" onClick={() => del(i)} aria-label="Delete entry"><Ic n="x" /></button>
+    </div>)}
+  </>;
+}
+
 function Dialog({ d, close }) {
   const [v, setV] = useState(d.input ?? '');
   useEffect(() => { const k = (e) => e.key === 'Escape' && close(); addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, []);
@@ -231,6 +248,7 @@ export default function Page() {
   const [dlg, setDlg] = useState(null);
   const [adding, setAdding] = useState(false); // false | true (route / travel list) | 'alt' (backup ideas)
   const [menu, setMenu] = useState(false);
+  const [sec, setSec] = useState(null); // id of the open Travel section, or null for the tile grid
   const desk = useMedia('(min-width:900px)');
   const [dsPref, setDsPref] = useState(null), [auto, setAuto] = useState(false), [wantMap, setWantMap] = useState(false), [mapErr, setMapErr] = useState(false), [mapTry, setMapTry] = useState(0);
   const ds = dsPref ?? auto; // data saver: explicit choice, else follow the device's Data Saver / 2G state
@@ -530,6 +548,14 @@ export default function Page() {
   const nobj = sc === 'trip' ? trip : trip.days[sc];
   const upN = (fn) => up((c, t) => fn(sc === 'trip' ? t : t.days[c.day]));
   const delTask = (t) => confirmDel('Delete task?', t.text, 'Delete', 'Task deleted', () => upN((o) => { o.todos = o.todos.filter((x) => x.id !== t.id); }));
+  const openSec = tm ? trip.secs.find((x) => x.id === sec) : null;
+  const upS = (fn) => up((_, t) => { const o = t.secs.find((x) => x.id === sec); if (o) fn(o); });
+  const secSum = (o) => o.items.reduce((a, i) => a + num(i.cost), 0);
+  const money = (n) => trip.cc + (Math.round(n * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const goSec = (id) => { setSec(id); panel.current?.querySelector('.body')?.scrollTo(0, 0); };
+  const newSec = () => setDlg({ title: 'New section', input: '', ph: 'Section name', label: 'Create', ok: (n) => { const id = uid(); up((_, t) => { t.secs.push({ id, name: n, notes: '', items: [] }); }); goSec(id); } });
+  const delSec = () => confirmDel(`Delete “${openSec.name || 'Untitled'}”?`, 'This removes its entries and notes.', 'Delete', 'Section deleted', () => { const id = openSec.id; up((_, t) => { t.secs = t.secs.filter((x) => x.id !== id); }); setSec(null); });
+  const delEnt = (i) => undoable('Entry deleted', () => upS((o) => { o.items = o.items.filter((x) => x.id !== i.id); }));
   const moveDay = (dir) => up((c, t) => { const i = c.day, j = i + dir; if (j >= 0 && j < t.days.length) { t.days.splice(j, 0, t.days.splice(i, 1)[0]); c.day = j; } });
   const removeDay = () => {
     if (trip.days.length < 2) return say('A trip needs at least one day');
@@ -619,7 +645,7 @@ export default function Page() {
             <button className="ib fill" onClick={() => setDlg({ title: 'New trip', input: '', ph: 'e.g. Rome', label: 'Create', ok: (n) => up((c) => { c.trips.push(newTrip(n)); c.cur = c.trips.length - 1; c.day = 0; }) })} aria-label="New trip"><Ic n="plus" /></button>
           </div>
           {hasTabs && <div className="tabs" role="tablist">
-            <button role="tab" className="tab" aria-selected={tm} onClick={() => setNs('trip')}><Ic n="pin" s={16} />Travel</button>
+            <button role="tab" className="tab" aria-selected={tm} onClick={() => { setNs('trip'); setSec(null); }}><Ic n="pin" s={16} />Travel</button>
             {trip.days.map((d, i) => <button key={d.id} role="tab" className="tab" aria-selected={!tm && i === s.day} onClick={() => { setNs('day'); up((c) => { c.day = i; }); }}>Day {i + 1}</button>)}
             <button className="tab" onClick={() => { setNs('day'); up((c, t) => { t.days.push(newDay()); c.day = t.days.length - 1; }); }}><Ic n="plus" s={16} />Day</button>
           </div>}
@@ -627,7 +653,7 @@ export default function Page() {
 
         <div className="body"><div className="wrap">
           {!online && <div className="off">Offline — itinerary and saved routes available</div>}
-          {hasTabs && (tm ? <h1 className="dtl">Travel locations</h1> : <input key={day.id} className="dtl" {...A(day.title)} maxLength={80} value={day.title || ''} placeholder={`Day ${s.day + 1}`} aria-label="Day title" enterKeyHint="done" onChange={(e) => up((_, __, d) => { d.title = e.target.value; })} />)}
+          {hasTabs && (tm ? (openSec && view === 'plan' ? <input key={openSec.id} className="dtl" {...A(openSec.name)} maxLength={60} value={openSec.name} placeholder="Section name" aria-label="Section name" enterKeyHint="done" onChange={(e) => upS((o) => { o.name = e.target.value; })} /> : <h1 className="dtl">Travel locations</h1>) : <input key={day.id} className="dtl" {...A(day.title)} maxLength={80} value={day.title || ''} placeholder={`Day ${s.day + 1}`} aria-label="Day title" enterKeyHint="done" onChange={(e) => up((_, __, d) => { d.title = e.target.value; })} />)}
           <div className="seg">{[['plan', 'Plan'], ['notes', 'Notes'], ['more', 'More']].map(([k, v]) => <button key={k} aria-pressed={view === k} onClick={() => setView(k)}>{v}</button>)}</div>
 
           {view === 'plan' && <div key={'plan:' + sc}>
@@ -636,8 +662,25 @@ export default function Page() {
               {hits.map(({ p, di, pi }) => <div className="card" key={p.id} onClick={() => { setNs('day'); up((c) => { c.day = di; }); setQ(''); }} style={{ cursor: 'pointer', marginBottom: 8 }}><div className="main"><b {...A(p.name)} className="bd">{p.name}</b><small>Day {di + 1} · stop {pi + 1}{p.sub ? ' · ' + p.sub : ''}</small></div></div>)}
               {!hits.length && <p className="sum">No matches.</p>}
             </> : <>
-              {tm ? <>
-                <h2 className="sec" style={{ marginTop: 6 }}>Travel locations</h2>
+              {tm ? openSec ? <>
+                <button className="ghost" onClick={() => goSec(null)}><Ic n="left" s={18} />All sections</button>
+                <div className="stats two" style={{ marginTop: 14 }}><div className="stat"><b>{openSec.items.length}</b><small>{openSec.items.length === 1 ? 'entry' : 'entries'}</small></div><div className="stat"><b>{money(secSum(openSec))}</b><small>total cost</small></div></div>
+                <h2 className="sec" style={{ marginTop: 6 }}>Entries</h2>
+                <SecEntries items={openSec.items} set={(fn) => upS((o) => { o.items = fn(o.items); })} del={delEnt} cc={trip.cc} />
+                <h2 className="sec">Notes</h2>
+                <textarea key={openSec.id} {...A(openSec.notes)} rows="6" placeholder="Details, booking numbers, links…" value={openSec.notes} onChange={(e) => upS((o) => { o.notes = e.target.value; })} />
+                <div className="row" style={{ marginTop: 22 }}><button className="ghost danger" onClick={delSec}><Ic n="trash" />Delete section</button></div>
+              </> : <>
+                <h2 className="sec" style={{ marginTop: 6 }}>Sections</h2>
+                {!trip.secs.length && <p className="sum" style={{ marginTop: 0 }}>Group anything for the whole trip into its own square, with its own entries, costs and notes.</p>}
+                <div className="tiles">
+                  {trip.secs.map((o) => { const n = o.items.length, t = secSum(o); return <button key={o.id} className="tile" onClick={() => goSec(o.id)}>
+                    <b {...A(o.name)}>{o.name || 'Untitled'}</b>
+                    <span className="tv"><i>{t ? money(t) : '—'}</i><small>{n ? `${n} ${n === 1 ? 'entry' : 'entries'}` : 'Empty'}</small></span>
+                  </button>; })}
+                  <button className="tile new" onClick={newSec}><span className="plus"><Ic n="plus" s={24} /></span>New section</button>
+                </div>
+                <h2 className="sec">Travel locations</h2>
                 {ok && <Search onPick={addPlace} />}
                 <div style={{ height: 14 }} />
                 {!trip.wish.length && <p className="sum">General places for the whole trip. Search above, or save a stop from its edit panel.</p>}
@@ -707,7 +750,7 @@ export default function Page() {
           </div>}
         </div></div>
       </section>
-      {ok && <button className="addfab" aria-label={`Add a place to ${tm ? 'Travel locations' : 'Day ' + (s.day + 1)}`} onClick={() => setAdding(true)}><Ic n="plus" s={26} /></button>}
+      {ok && !openSec && <button className="addfab" aria-label={`Add a place to ${tm ? 'Travel locations' : 'Day ' + (s.day + 1)}`} onClick={() => setAdding(true)}><Ic n="plus" s={26} /></button>}
       {toast && <div className="toast" role="status" key={toast.msg}>{toast.msg}{toast.act && <button onClick={() => { toast.fn(); setToast(null); }}>{toast.act}</button>}</div>}
       {upd && <div className="toast" role="status" style={{ top: 'calc(var(--top) + 68px)' }}>New version available<button onClick={() => location.reload()}>Reload</button><button aria-label="Later" style={{ background: 'none', color: 'inherit', padding: 0, width: 36 }} onClick={() => { updSkip.current = true; setUpd(false); }}><Ic n="x" s={16} /></button></div>}
       {dlg && <Dialog d={dlg} close={() => setDlg(null)} />}
